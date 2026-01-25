@@ -1,6 +1,7 @@
 package renderer
 
 import "core:log"
+import "core:sync"
 import "core:time"
 import vk "vendor:vulkan"
 
@@ -26,10 +27,22 @@ Swapchain :: struct {
 	image_views: []vk.ImageView,
 }
 
+OFFSCREEN_WIDTH :: 1920
+OFFSCREEN_HEIGHT :: 1080
+OFFSCREEN_FORMAT: vk.Format = .R32G32B32A32_SFLOAT
+
+OffscreenTarget :: struct {
+	extent:     vk.Extent2D,
+	format:     vk.Format,
+	image:      vk.Image,
+	image_view: vk.ImageView,
+	mem:        vk.DeviceMemory,
+	layout:     vk.ImageLayout,
+}
+
+
 GlowRenderer :: struct {
 	using vk_context:           VulkanContext,
-	window_width:               int,
-	window_height:              int,
 	surface:                    vk.SurfaceKHR,
 	surface_format:             vk.SurfaceFormatKHR,
 	present_mode:               vk.PresentModeKHR,
@@ -38,10 +51,16 @@ GlowRenderer :: struct {
 	swapchain_height:           int,
 	image_available_semaphore:  vk.Semaphore,
 	render_finished_semaphores: []vk.Semaphore,
-	render_fence:               vk.Fence,
 	cmd_pool:                   vk.CommandPool,
-	cmd_buffer:                 vk.CommandBuffer,
+	render_cmd_buffer:          vk.CommandBuffer,
+	present_cmd_buffer:         vk.CommandBuffer,
 	descriptor_pool:            vk.DescriptorPool,
+	offscreen:                  [2]OffscreenTarget,
+	offscreen_index:            u32,
+	render_fence:               vk.Fence,
+	present_fence:              vk.Fence,
+	render_in_flight_index:     u32,
+	offscreen_has_ready:        bool,
 }
 
 MAX_DESCRIPTOR_SETS :: 128
@@ -73,20 +92,26 @@ create_renderer :: proc(
 		sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
 		level              = .PRIMARY,
 		commandPool        = ren.cmd_pool,
-		commandBufferCount = 1,
+		commandBufferCount = 2,
 	}
-	vk_try(vk.AllocateCommandBuffers(ren.device, &cmd_buffer_info, &ren.cmd_buffer))
+	cmds := make([]vk.CommandBuffer, 2)
+	vk_try(vk.AllocateCommandBuffers(ren.device, &cmd_buffer_info, raw_data(cmds)))
+	ren.render_cmd_buffer = cmds[0]
+	ren.present_cmd_buffer = cmds[1]
 
 	ren.render_finished_semaphores = make([]vk.Semaphore, ren.swapchain.image_count)
 	sem_info := vk.SemaphoreCreateInfo {
 		sType = .SEMAPHORE_CREATE_INFO,
 	}
+
 	fence_info := vk.FenceCreateInfo {
 		sType = .FENCE_CREATE_INFO,
 		flags = {.SIGNALED},
 	}
-	vk_try(vk.CreateSemaphore(ren.device, &sem_info, nil, &ren.image_available_semaphore))
 	vk_try(vk.CreateFence(ren.device, &fence_info, nil, &ren.render_fence))
+	vk_try(vk.CreateFence(ren.device, &fence_info, nil, &ren.present_fence))
+
+	vk_try(vk.CreateSemaphore(ren.device, &sem_info, nil, &ren.image_available_semaphore))
 	for &sem in ren.render_finished_semaphores {
 		vk_try(vk.CreateSemaphore(ren.device, &sem_info, nil, &sem))
 	}
@@ -104,16 +129,20 @@ create_renderer :: proc(
 	}
 	vk_try(vk.CreateDescriptorPool(ren.device, &pool_info, nil, &ren.descriptor_pool))
 
+	init_offscreen_targets(&ren)
+
 	return ren
 }
 
 destroy_renderer :: proc(ren: ^GlowRenderer) {
+	destroy_offscreen_targets(ren)
 	destroy_swapchain(ren, &ren.swapchain)
 
 	vk.DestroySurfaceKHR(ren.instance, ren.surface, nil)
 
 	vk.DestroySemaphore(ren.device, ren.image_available_semaphore, nil)
 	vk.DestroyFence(ren.device, ren.render_fence, nil)
+	vk.DestroyFence(ren.device, ren.present_fence, nil)
 
 	for sem in ren.render_finished_semaphores {
 		vk.DestroySemaphore(ren.device, sem, nil)
@@ -124,18 +153,106 @@ destroy_renderer :: proc(ren: ^GlowRenderer) {
 }
 
 resize_swapchain :: proc(ren: ^GlowRenderer, new_width: int, new_height: int) {
-	vk_try(vk.WaitForFences(ren.device, 1, &ren.render_fence, true, max(u64)))
+	//vk_try(vk.WaitForFences(ren.device, 1, &ren.render_fence, true, max(u64)))
 	ren.swapchain_width = new_width
 	ren.swapchain_height = new_height
 	recreate_swapchain(ren)
 }
 
-render :: proc(ren: ^GlowRenderer, push: ^PushConstants, passes: []RenderPass) {
+mut: sync.Mutex
+
+render_offscreen :: proc(ren: ^GlowRenderer, push: ^PushConstants, passes: []RenderPass) {
 	vk_try(vk.WaitForFences(ren.device, 1, &ren.render_fence, true, max(u64)))
-	swapchain: Swapchain = ren.swapchain
+
+	sync.lock(&mut)
+	defer sync.unlock(&mut)
+
+	target_index := (ren.render_in_flight_index + 1) % 2
+	off := &ren.offscreen[target_index]
+
+	vk.ResetCommandBuffer(ren.render_cmd_buffer, {})
+	begin_info := vk.CommandBufferBeginInfo {
+		sType = .COMMAND_BUFFER_BEGIN_INFO,
+	}
+	vk.BeginCommandBuffer(ren.render_cmd_buffer, &begin_info)
+
+	src_stage := vk.PipelineStageFlags2.TOP_OF_PIPE
+	src_access := vk.AccessFlags2{}
+	if off.layout == .TRANSFER_SRC_OPTIMAL {
+		src_stage = vk.PipelineStageFlags2.TRANSFER
+		src_access = vk.AccessFlags2{.TRANSFER_READ}
+	}
+	transition_image_layout(
+		ren.render_cmd_buffer,
+		off.image,
+		off.layout,
+		.COLOR_ATTACHMENT_OPTIMAL,
+		src_access,
+		{.COLOR_ATTACHMENT_WRITE},
+		{src_stage},
+		{.COLOR_ATTACHMENT_OUTPUT},
+		{.COLOR},
+	)
+	off.layout = .COLOR_ATTACHMENT_OPTIMAL
+
+	color_attachment := vk.RenderingAttachmentInfo {
+		sType       = .RENDERING_ATTACHMENT_INFO,
+		imageView   = off.image_view,
+		imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+		loadOp      = .DONT_CARE,
+		storeOp     = .STORE,
+	}
+	rendering_info := vk.RenderingInfo {
+		sType = .RENDERING_INFO,
+		renderArea = {offset = {0, 0}, extent = off.extent},
+		layerCount = 1,
+		colorAttachmentCount = 1,
+		pColorAttachments = &color_attachment,
+	}
+	vk.CmdBeginRendering(ren.render_cmd_buffer, &rendering_info)
+	for &pass in passes {
+		record_pass_commands(&pass, ren.render_cmd_buffer, push)
+	}
+	vk.CmdEndRendering(ren.render_cmd_buffer)
+
+	transition_image_layout(
+		ren.render_cmd_buffer,
+		off.image,
+		.COLOR_ATTACHMENT_OPTIMAL,
+		.TRANSFER_SRC_OPTIMAL,
+		{.COLOR_ATTACHMENT_WRITE},
+		{.TRANSFER_READ},
+		{.COLOR_ATTACHMENT_OUTPUT},
+		{.TRANSFER},
+		{.COLOR},
+	)
+	off.layout = .TRANSFER_SRC_OPTIMAL
+
+	vk.EndCommandBuffer(ren.render_cmd_buffer)
+
+	vk_try(vk.ResetFences(ren.device, 1, &ren.render_fence))
+	submit_info := vk.SubmitInfo {
+		sType              = .SUBMIT_INFO,
+		commandBufferCount = 1,
+		pCommandBuffers    = &ren.render_cmd_buffer,
+	}
+	vk_try(vk.QueueSubmit(ren.graphics_queue, 1, &submit_info, ren.render_fence))
+
+	ren.offscreen_index = ren.render_in_flight_index
+	ren.render_in_flight_index = target_index
+
+	if !ren.offscreen_has_ready {
+		vk_try(vk.WaitForFences(ren.device, 1, &ren.render_fence, true, max(u64)))
+		ren.offscreen_index = target_index
+		ren.offscreen_has_ready = true
+	}
+}
+
+present :: proc(ren: ^GlowRenderer) {
+	vk_try(vk.WaitForFences(ren.device, 1, &ren.present_fence, true, max(u64)))
+	swapchain := ren.swapchain
 
 	sem_image_available := ren.image_available_semaphore
-
 	image_index: u32
 	acquire_result := vk.AcquireNextImageKHR(
 		ren.device,
@@ -148,86 +265,89 @@ render :: proc(ren: ^GlowRenderer, push: ^PushConstants, passes: []RenderPass) {
 	#partial switch acquire_result {
 	case .ERROR_OUT_OF_DATE_KHR:
 		recreate_swapchain(ren)
+		return
 	case .SUCCESS, .SUBOPTIMAL_KHR:
 	case:
 		log.panicf("vulkan: acquire next image failure: %v", acquire_result)
 	}
 
-	cmd_buffer := ren.cmd_buffer
-	vk.ResetCommandBuffer(cmd_buffer, {})
+	sync.lock(&mut)
+	defer sync.unlock(&mut)
 
+	current_image := swapchain.images[image_index]
+	off := &ren.offscreen[ren.offscreen_index]
+	ensure(off.layout == .TRANSFER_SRC_OPTIMAL, "Offscreen target not ready for present.")
+
+	vk.ResetCommandBuffer(ren.present_cmd_buffer, {})
 	begin_info := vk.CommandBufferBeginInfo {
 		sType = .COMMAND_BUFFER_BEGIN_INFO,
 	}
-	vk.BeginCommandBuffer(cmd_buffer, &begin_info)
+	vk.BeginCommandBuffer(ren.present_cmd_buffer, &begin_info)
 
-	current_image := swapchain.images[image_index]
 	transition_image_layout(
-		cmd_buffer,
+		ren.present_cmd_buffer,
 		current_image,
 		.UNDEFINED,
-		.COLOR_ATTACHMENT_OPTIMAL,
+		.TRANSFER_DST_OPTIMAL,
 		{},
-		{.COLOR_ATTACHMENT_WRITE},
-		{.TOP_OF_PIPE},
-		{.COLOR_ATTACHMENT_OUTPUT},
+		{.TRANSFER_WRITE},
+		{.BOTTOM_OF_PIPE},
+		{.TRANSFER},
 		{.COLOR},
 	)
-	color_attachment := vk.RenderingAttachmentInfo {
-		sType = .RENDERING_ATTACHMENT_INFO,
-		imageView = swapchain.image_views[image_index],
-		imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-		loadOp = .CLEAR,
-		storeOp = .STORE,
-		clearValue = vk.ClearValue {
-			color = vk.ClearColorValue{float32 = [4]f32{0.4, 0.1, 0.1, 1.0}},
-		},
-	}
-	render_width := min(ren.window_width, ren.swapchain_width)
-	render_height := min(ren.window_height, ren.swapchain_height)
-	rendering_info := vk.RenderingInfo {
-		sType = .RENDERING_INFO,
-		renderArea = {
-			offset = {0, 0},
-			extent = vk.Extent2D{width = u32(render_width), height = u32(render_height)},
-		},
-		layerCount = 1,
-		colorAttachmentCount = 1,
-		pColorAttachments = &color_attachment,
-	}
-	vk.CmdBeginRendering(cmd_buffer, &rendering_info)
-	for &pass in passes {
-		record_pass_commands(&pass, cmd_buffer, push)
-	}
 
-	vk.CmdEndRendering(cmd_buffer)
-	transition_image_layout(
-		cmd_buffer,
+	copy_extent := vk.Extent2D {
+		width  = min(off.extent.width, swapchain.extent.width),
+		height = min(off.extent.height, swapchain.extent.height),
+	}
+	copy_region := vk.ImageBlit {
+		srcSubresource = {aspectMask = {.COLOR}, layerCount = 1},
+		srcOffsets = [2]vk.Offset3D{{0, 0, 0}, {i32(off.extent.width), i32(off.extent.height), 1}},
+		dstSubresource = {aspectMask = {.COLOR}, layerCount = 1},
+		dstOffsets = [2]vk.Offset3D {
+			{0, 0, 0},
+			{i32(swapchain.extent.width), i32(swapchain.extent.height), 1},
+		},
+	}
+	vk.CmdBlitImage(
+		ren.present_cmd_buffer,
+		off.image,
+		.TRANSFER_SRC_OPTIMAL,
 		current_image,
-		.COLOR_ATTACHMENT_OPTIMAL,
+		.TRANSFER_DST_OPTIMAL,
+		1,
+		&copy_region,
+		.LINEAR,
+	)
+
+	transition_image_layout(
+		ren.present_cmd_buffer,
+		current_image,
+		.TRANSFER_DST_OPTIMAL,
 		.PRESENT_SRC_KHR,
-		{.COLOR_ATTACHMENT_WRITE},
+		{.TRANSFER_WRITE},
 		{},
-		{.COLOR_ATTACHMENT_OUTPUT},
+		{.TRANSFER},
 		{.BOTTOM_OF_PIPE},
 		{.COLOR},
 	)
-	vk.EndCommandBuffer(cmd_buffer)
+
+	vk.EndCommandBuffer(ren.present_cmd_buffer)
 
 	sem_render_finished := ren.render_finished_semaphores[image_index]
 	submit_info := vk.SubmitInfo {
 		sType                = .SUBMIT_INFO,
 		waitSemaphoreCount   = 1,
 		pWaitSemaphores      = &sem_image_available,
-		pWaitDstStageMask    = &vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT},
+		pWaitDstStageMask    = &vk.PipelineStageFlags{.TRANSFER},
 		commandBufferCount   = 1,
-		pCommandBuffers      = &cmd_buffer,
+		pCommandBuffers      = &ren.present_cmd_buffer,
 		signalSemaphoreCount = 1,
 		pSignalSemaphores    = &sem_render_finished,
 	}
+	vk_try(vk.ResetFences(ren.device, 1, &ren.present_fence))
+	vk_try(vk.QueueSubmit(ren.graphics_queue, 1, &submit_info, ren.present_fence))
 
-	vk_try(vk.ResetFences(ren.device, 1, &ren.render_fence))
-	vk_try(vk.QueueSubmit(ren.graphics_queue, 1, &submit_info, ren.render_fence))
 
 	present_info := vk.PresentInfoKHR {
 		sType              = .PRESENT_INFO_KHR,
@@ -245,10 +365,6 @@ render :: proc(ren: ^GlowRenderer, push: ^PushConstants, passes: []RenderPass) {
 	case:
 		log.panicf("vulkan: present failure: %v", present_result)
 	}
-	if swapchain.h != ren.swapchain.h {
-		destroy_swapchain(ren, &ren.swapchain)
-		ren.swapchain = swapchain
-	}
 }
 
 recreate_swapchain :: proc(ren: ^GlowRenderer) {
@@ -256,6 +372,48 @@ recreate_swapchain :: proc(ren: ^GlowRenderer) {
 	create_swapchain(ren, &new_swapchain, &ren.swapchain)
 	destroy_swapchain(ren, &ren.swapchain)
 	ren.swapchain = new_swapchain
+}
+
+@(private = "file")
+init_offscreen_targets :: proc(ren: ^GlowRenderer) {
+	extent := vk.Extent2D {
+		width  = OFFSCREEN_WIDTH,
+		height = OFFSCREEN_HEIGHT,
+	}
+	for i in 0 ..< 2 {
+		img, mem := create_2d_image(
+			&ren.vk_context,
+			OFFSCREEN_FORMAT,
+			extent.width,
+			extent.height,
+			{.COLOR_ATTACHMENT, .TRANSFER_SRC},
+			.UNDEFINED,
+		)
+		view := create_image_view_2d(&ren.vk_context, img, OFFSCREEN_FORMAT, {.COLOR})
+		ren.offscreen[i] = OffscreenTarget {
+			extent     = extent,
+			format     = OFFSCREEN_FORMAT,
+			image      = img,
+			image_view = view,
+			mem        = mem,
+			layout     = .UNDEFINED,
+		}
+	}
+}
+
+@(private = "file")
+destroy_offscreen_targets :: proc(ren: ^GlowRenderer) {
+	for i in 0 ..< 2 {
+		if ren.offscreen[i].image_view != {} {
+			vk.DestroyImageView(ren.device, ren.offscreen[i].image_view, nil)
+		}
+		if ren.offscreen[i].image != {} {
+			vk.DestroyImage(ren.device, ren.offscreen[i].image, nil)
+		}
+		if ren.offscreen[i].mem != {} {
+			vk.FreeMemory(ren.device, ren.offscreen[i].mem, nil)
+		}
+	}
 }
 
 @(private = "file")
@@ -345,7 +503,7 @@ create_swapchain :: proc(
 		presentMode      = ren.present_mode,
 		imageExtent      = new_swapchain.extent,
 		imageArrayLayers = 1,
-		imageUsage       = {.COLOR_ATTACHMENT},
+		imageUsage       = {.COLOR_ATTACHMENT, .TRANSFER_DST},
 		preTransform     = capabilities.currentTransform,
 		compositeAlpha   = {.OPAQUE},
 		clipped          = true,

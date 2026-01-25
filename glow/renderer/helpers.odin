@@ -103,3 +103,20 @@ create_2d_image :: proc(
 	vk_try(vk.BindImageMemory(vkc.device, image, mem, 0))
 	return
 }
+
+create_image_view_2d :: proc(
+    vkc: ^VulkanContext,
+    image: vk.Image,
+    format: vk.Format,
+    aspect: vk.ImageAspectFlags,
+) -> (view: vk.ImageView) {
+    create_info := vk.ImageViewCreateInfo {
+        sType = .IMAGE_VIEW_CREATE_INFO,
+        image = image,
+        viewType = .D2,
+        format = format,
+        subresourceRange = {aspectMask = aspect, levelCount = 1, layerCount = 1},
+    }
+    vk_try(vk.CreateImageView(vkc.device, &create_info, nil, &view))
+    return
+}
