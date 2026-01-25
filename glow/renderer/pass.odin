@@ -108,7 +108,7 @@ create_render_pass :: proc(pass: ^RenderPass, ren: ^GlowRenderer, module: vk.Sha
 		pName  = "psMain",
 	}
 	shader_stages := []vk.PipelineShaderStageCreateInfo{vertex_shader_info, pixel_shader_info}
-	format : vk.Format = .R32G32B32A32_SFLOAT
+	format : vk.Format = OFFSCREEN_FORMAT
 	pipeline_rendering_info := vk.PipelineRenderingCreateInfo {
 		sType                   = .PIPELINE_RENDERING_CREATE_INFO,
 		colorAttachmentCount    = 1,

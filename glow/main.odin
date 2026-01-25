@@ -15,11 +15,9 @@ test_shader_module: vk.ShaderModule
 test_pass: ren.RenderPass
 
 window: ^sdl3.Window
-render_thread: ^thread.Thread
 timer: time.Stopwatch
 
 should_present: bool
-should_exit: bool
 window_width: int
 window_height: int
 
@@ -76,21 +74,8 @@ app_init :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 
 	time.stopwatch_start(&timer)
 
-	render_thread = thread.create_and_start(render_proc, nil)
+	should_present = true
 	return .CONTINUE
-}
-
-render_proc :: proc() {
-	context = global_context
-
-	for !should_exit {
-		push: ren.PushConstants
-		push.time = f32(time.duration_seconds(time.stopwatch_duration(timer)))
-		push.aspect_ratio = f32(window_width) / f32(window_height)
-		ren.render_offscreen(&glow, &push, []ren.RenderPass{test_pass})
-		should_present = true
-		time.sleep(time.Millisecond * 10)
-	}
 }
 
 app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
@@ -98,7 +83,10 @@ app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
 	if !should_present {
 		return .CONTINUE
 	}
-	ren.present(&glow)
+	push: ren.PushConstants
+	push.time = f32(time.duration_seconds(time.stopwatch_duration(timer)))
+	push.aspect_ratio = f32(window_width) / f32(window_height)
+	ren.render(&glow, &push, []ren.RenderPass{test_pass})
 	return .CONTINUE
 }
 
@@ -123,8 +111,6 @@ app_event :: proc "c" (userdata: rawptr, event: ^sdl3.Event) -> sdl3.AppResult {
 
 app_quit :: proc "c" (appstate: rawptr, result: sdl3.AppResult) {
 	context = global_context
-	should_exit = true
-	thread.join(render_thread)
 
 	vk.DeviceWaitIdle(glow.device)
 

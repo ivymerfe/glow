@@ -40,7 +40,6 @@ OffscreenTarget :: struct {
 	layout:     vk.ImageLayout,
 }
 
-
 GlowRenderer :: struct {
 	using vk_context:           VulkanContext,
 	surface:                    vk.SurfaceKHR,
@@ -52,15 +51,10 @@ GlowRenderer :: struct {
 	image_available_semaphore:  vk.Semaphore,
 	render_finished_semaphores: []vk.Semaphore,
 	cmd_pool:                   vk.CommandPool,
-	render_cmd_buffer:          vk.CommandBuffer,
-	present_cmd_buffer:         vk.CommandBuffer,
-	descriptor_pool:            vk.DescriptorPool,
-	offscreen:                  [2]OffscreenTarget,
-	offscreen_index:            u32,
+	cmd_buffer:                 vk.CommandBuffer,
 	render_fence:               vk.Fence,
-	present_fence:              vk.Fence,
-	render_in_flight_index:     u32,
-	offscreen_has_ready:        bool,
+	descriptor_pool:            vk.DescriptorPool,
+	offscreen:                  OffscreenTarget,
 }
 
 MAX_DESCRIPTOR_SETS :: 128
@@ -92,12 +86,9 @@ create_renderer :: proc(
 		sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
 		level              = .PRIMARY,
 		commandPool        = ren.cmd_pool,
-		commandBufferCount = 2,
+		commandBufferCount = 1,
 	}
-	cmds := make([]vk.CommandBuffer, 2)
-	vk_try(vk.AllocateCommandBuffers(ren.device, &cmd_buffer_info, raw_data(cmds)))
-	ren.render_cmd_buffer = cmds[0]
-	ren.present_cmd_buffer = cmds[1]
+	vk_try(vk.AllocateCommandBuffers(ren.device, &cmd_buffer_info, &ren.cmd_buffer))
 
 	ren.render_finished_semaphores = make([]vk.Semaphore, ren.swapchain.image_count)
 	sem_info := vk.SemaphoreCreateInfo {
@@ -109,7 +100,6 @@ create_renderer :: proc(
 		flags = {.SIGNALED},
 	}
 	vk_try(vk.CreateFence(ren.device, &fence_info, nil, &ren.render_fence))
-	vk_try(vk.CreateFence(ren.device, &fence_info, nil, &ren.present_fence))
 
 	vk_try(vk.CreateSemaphore(ren.device, &sem_info, nil, &ren.image_available_semaphore))
 	for &sem in ren.render_finished_semaphores {
@@ -142,7 +132,6 @@ destroy_renderer :: proc(ren: ^GlowRenderer) {
 
 	vk.DestroySemaphore(ren.device, ren.image_available_semaphore, nil)
 	vk.DestroyFence(ren.device, ren.render_fence, nil)
-	vk.DestroyFence(ren.device, ren.present_fence, nil)
 
 	for sem in ren.render_finished_semaphores {
 		vk.DestroySemaphore(ren.device, sem, nil)
@@ -159,97 +148,8 @@ resize_swapchain :: proc(ren: ^GlowRenderer, new_width: int, new_height: int) {
 	recreate_swapchain(ren)
 }
 
-mut: sync.Mutex
-
-render_offscreen :: proc(ren: ^GlowRenderer, push: ^PushConstants, passes: []RenderPass) {
+render :: proc(ren: ^GlowRenderer, push: ^PushConstants, passes: []RenderPass) {
 	vk_try(vk.WaitForFences(ren.device, 1, &ren.render_fence, true, max(u64)))
-
-	sync.lock(&mut)
-	defer sync.unlock(&mut)
-
-	target_index := (ren.render_in_flight_index + 1) % 2
-	off := &ren.offscreen[target_index]
-
-	vk.ResetCommandBuffer(ren.render_cmd_buffer, {})
-	begin_info := vk.CommandBufferBeginInfo {
-		sType = .COMMAND_BUFFER_BEGIN_INFO,
-	}
-	vk.BeginCommandBuffer(ren.render_cmd_buffer, &begin_info)
-
-	src_stage := vk.PipelineStageFlags2.TOP_OF_PIPE
-	src_access := vk.AccessFlags2{}
-	if off.layout == .TRANSFER_SRC_OPTIMAL {
-		src_stage = vk.PipelineStageFlags2.TRANSFER
-		src_access = vk.AccessFlags2{.TRANSFER_READ}
-	}
-	transition_image_layout(
-		ren.render_cmd_buffer,
-		off.image,
-		off.layout,
-		.COLOR_ATTACHMENT_OPTIMAL,
-		src_access,
-		{.COLOR_ATTACHMENT_WRITE},
-		{src_stage},
-		{.COLOR_ATTACHMENT_OUTPUT},
-		{.COLOR},
-	)
-	off.layout = .COLOR_ATTACHMENT_OPTIMAL
-
-	color_attachment := vk.RenderingAttachmentInfo {
-		sType       = .RENDERING_ATTACHMENT_INFO,
-		imageView   = off.image_view,
-		imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-		loadOp      = .DONT_CARE,
-		storeOp     = .STORE,
-	}
-	rendering_info := vk.RenderingInfo {
-		sType = .RENDERING_INFO,
-		renderArea = {offset = {0, 0}, extent = off.extent},
-		layerCount = 1,
-		colorAttachmentCount = 1,
-		pColorAttachments = &color_attachment,
-	}
-	vk.CmdBeginRendering(ren.render_cmd_buffer, &rendering_info)
-	for &pass in passes {
-		record_pass_commands(&pass, ren.render_cmd_buffer, push)
-	}
-	vk.CmdEndRendering(ren.render_cmd_buffer)
-
-	transition_image_layout(
-		ren.render_cmd_buffer,
-		off.image,
-		.COLOR_ATTACHMENT_OPTIMAL,
-		.TRANSFER_SRC_OPTIMAL,
-		{.COLOR_ATTACHMENT_WRITE},
-		{.TRANSFER_READ},
-		{.COLOR_ATTACHMENT_OUTPUT},
-		{.TRANSFER},
-		{.COLOR},
-	)
-	off.layout = .TRANSFER_SRC_OPTIMAL
-
-	vk.EndCommandBuffer(ren.render_cmd_buffer)
-
-	vk_try(vk.ResetFences(ren.device, 1, &ren.render_fence))
-	submit_info := vk.SubmitInfo {
-		sType              = .SUBMIT_INFO,
-		commandBufferCount = 1,
-		pCommandBuffers    = &ren.render_cmd_buffer,
-	}
-	vk_try(vk.QueueSubmit(ren.graphics_queue, 1, &submit_info, ren.render_fence))
-
-	ren.offscreen_index = ren.render_in_flight_index
-	ren.render_in_flight_index = target_index
-
-	if !ren.offscreen_has_ready {
-		vk_try(vk.WaitForFences(ren.device, 1, &ren.render_fence, true, max(u64)))
-		ren.offscreen_index = target_index
-		ren.offscreen_has_ready = true
-	}
-}
-
-present :: proc(ren: ^GlowRenderer) {
-	vk_try(vk.WaitForFences(ren.device, 1, &ren.present_fence, true, max(u64)))
 	swapchain := ren.swapchain
 
 	sem_image_available := ren.image_available_semaphore
@@ -271,22 +171,70 @@ present :: proc(ren: ^GlowRenderer) {
 		log.panicf("vulkan: acquire next image failure: %v", acquire_result)
 	}
 
-	sync.lock(&mut)
-	defer sync.unlock(&mut)
+	swapchain_image := swapchain.images[image_index]
+	target_image := &ren.offscreen
 
-	current_image := swapchain.images[image_index]
-	off := &ren.offscreen[ren.offscreen_index]
-	ensure(off.layout == .TRANSFER_SRC_OPTIMAL, "Offscreen target not ready for present.")
-
-	vk.ResetCommandBuffer(ren.present_cmd_buffer, {})
+	cmd_buffer := ren.cmd_buffer
+	vk.ResetCommandBuffer(cmd_buffer, {})
 	begin_info := vk.CommandBufferBeginInfo {
 		sType = .COMMAND_BUFFER_BEGIN_INFO,
 	}
-	vk.BeginCommandBuffer(ren.present_cmd_buffer, &begin_info)
+	vk.BeginCommandBuffer(cmd_buffer, &begin_info)
+
+	src_stage := vk.PipelineStageFlags2.TOP_OF_PIPE
+	src_access := vk.AccessFlags2{}
+	if target_image.layout == .TRANSFER_SRC_OPTIMAL {
+		src_stage = vk.PipelineStageFlags2.TRANSFER
+		src_access = vk.AccessFlags2{.TRANSFER_READ}
+	}
+	transition_image_layout(
+		cmd_buffer,
+		target_image.image,
+		target_image.layout,
+		.COLOR_ATTACHMENT_OPTIMAL,
+		src_access,
+		{.COLOR_ATTACHMENT_WRITE},
+		{src_stage},
+		{.COLOR_ATTACHMENT_OUTPUT},
+		{.COLOR},
+	)
+	target_image.layout = .COLOR_ATTACHMENT_OPTIMAL
+
+	color_attachment := vk.RenderingAttachmentInfo {
+		sType       = .RENDERING_ATTACHMENT_INFO,
+		imageView   = target_image.image_view,
+		imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+		loadOp      = .DONT_CARE,
+		storeOp     = .STORE,
+	}
+	rendering_info := vk.RenderingInfo {
+		sType = .RENDERING_INFO,
+		renderArea = {offset = {0, 0}, extent = target_image.extent},
+		layerCount = 1,
+		colorAttachmentCount = 1,
+		pColorAttachments = &color_attachment,
+	}
+	vk.CmdBeginRendering(cmd_buffer, &rendering_info)
+	for &pass in passes {
+		record_pass_commands(&pass, cmd_buffer, push)
+	}
+	vk.CmdEndRendering(cmd_buffer)
+	transition_image_layout(
+		cmd_buffer,
+		target_image.image,
+		.COLOR_ATTACHMENT_OPTIMAL,
+		.TRANSFER_SRC_OPTIMAL,
+		{.COLOR_ATTACHMENT_WRITE},
+		{.TRANSFER_READ},
+		{.COLOR_ATTACHMENT_OUTPUT},
+		{.TRANSFER},
+		{.COLOR},
+	)
+	target_image.layout = .TRANSFER_SRC_OPTIMAL
 
 	transition_image_layout(
-		ren.present_cmd_buffer,
-		current_image,
+		cmd_buffer,
+		swapchain_image,
 		.UNDEFINED,
 		.TRANSFER_DST_OPTIMAL,
 		{},
@@ -296,13 +244,12 @@ present :: proc(ren: ^GlowRenderer) {
 		{.COLOR},
 	)
 
-	copy_extent := vk.Extent2D {
-		width  = min(off.extent.width, swapchain.extent.width),
-		height = min(off.extent.height, swapchain.extent.height),
-	}
 	copy_region := vk.ImageBlit {
 		srcSubresource = {aspectMask = {.COLOR}, layerCount = 1},
-		srcOffsets = [2]vk.Offset3D{{0, 0, 0}, {i32(off.extent.width), i32(off.extent.height), 1}},
+		srcOffsets = [2]vk.Offset3D {
+			{0, 0, 0},
+			{i32(target_image.extent.width), i32(target_image.extent.height), 1},
+		},
 		dstSubresource = {aspectMask = {.COLOR}, layerCount = 1},
 		dstOffsets = [2]vk.Offset3D {
 			{0, 0, 0},
@@ -310,10 +257,10 @@ present :: proc(ren: ^GlowRenderer) {
 		},
 	}
 	vk.CmdBlitImage(
-		ren.present_cmd_buffer,
-		off.image,
+		cmd_buffer,
+		target_image.image,
 		.TRANSFER_SRC_OPTIMAL,
-		current_image,
+		swapchain_image,
 		.TRANSFER_DST_OPTIMAL,
 		1,
 		&copy_region,
@@ -321,8 +268,8 @@ present :: proc(ren: ^GlowRenderer) {
 	)
 
 	transition_image_layout(
-		ren.present_cmd_buffer,
-		current_image,
+		cmd_buffer,
+		swapchain_image,
 		.TRANSFER_DST_OPTIMAL,
 		.PRESENT_SRC_KHR,
 		{.TRANSFER_WRITE},
@@ -332,7 +279,7 @@ present :: proc(ren: ^GlowRenderer) {
 		{.COLOR},
 	)
 
-	vk.EndCommandBuffer(ren.present_cmd_buffer)
+	vk.EndCommandBuffer(cmd_buffer)
 
 	sem_render_finished := ren.render_finished_semaphores[image_index]
 	submit_info := vk.SubmitInfo {
@@ -341,12 +288,12 @@ present :: proc(ren: ^GlowRenderer) {
 		pWaitSemaphores      = &sem_image_available,
 		pWaitDstStageMask    = &vk.PipelineStageFlags{.TRANSFER},
 		commandBufferCount   = 1,
-		pCommandBuffers      = &ren.present_cmd_buffer,
+		pCommandBuffers      = &cmd_buffer,
 		signalSemaphoreCount = 1,
 		pSignalSemaphores    = &sem_render_finished,
 	}
-	vk_try(vk.ResetFences(ren.device, 1, &ren.present_fence))
-	vk_try(vk.QueueSubmit(ren.graphics_queue, 1, &submit_info, ren.present_fence))
+	vk_try(vk.ResetFences(ren.device, 1, &ren.render_fence))
+	vk_try(vk.QueueSubmit(ren.graphics_queue, 1, &submit_info, ren.render_fence))
 
 
 	present_info := vk.PresentInfoKHR {
@@ -380,39 +327,35 @@ init_offscreen_targets :: proc(ren: ^GlowRenderer) {
 		width  = OFFSCREEN_WIDTH,
 		height = OFFSCREEN_HEIGHT,
 	}
-	for i in 0 ..< 2 {
-		img, mem := create_2d_image(
-			&ren.vk_context,
-			OFFSCREEN_FORMAT,
-			extent.width,
-			extent.height,
-			{.COLOR_ATTACHMENT, .TRANSFER_SRC},
-			.UNDEFINED,
-		)
-		view := create_image_view_2d(&ren.vk_context, img, OFFSCREEN_FORMAT, {.COLOR})
-		ren.offscreen[i] = OffscreenTarget {
-			extent     = extent,
-			format     = OFFSCREEN_FORMAT,
-			image      = img,
-			image_view = view,
-			mem        = mem,
-			layout     = .UNDEFINED,
-		}
+	img, mem := create_2d_image(
+		&ren.vk_context,
+		OFFSCREEN_FORMAT,
+		extent.width,
+		extent.height,
+		{.COLOR_ATTACHMENT, .TRANSFER_SRC},
+		.UNDEFINED,
+	)
+	view := create_image_view_2d(&ren.vk_context, img, OFFSCREEN_FORMAT, {.COLOR})
+	ren.offscreen = OffscreenTarget {
+		extent     = extent,
+		format     = OFFSCREEN_FORMAT,
+		image      = img,
+		image_view = view,
+		mem        = mem,
+		layout     = .UNDEFINED,
 	}
 }
 
 @(private = "file")
 destroy_offscreen_targets :: proc(ren: ^GlowRenderer) {
-	for i in 0 ..< 2 {
-		if ren.offscreen[i].image_view != {} {
-			vk.DestroyImageView(ren.device, ren.offscreen[i].image_view, nil)
-		}
-		if ren.offscreen[i].image != {} {
-			vk.DestroyImage(ren.device, ren.offscreen[i].image, nil)
-		}
-		if ren.offscreen[i].mem != {} {
-			vk.FreeMemory(ren.device, ren.offscreen[i].mem, nil)
-		}
+	if ren.offscreen.image_view != {} {
+		vk.DestroyImageView(ren.device, ren.offscreen.image_view, nil)
+	}
+	if ren.offscreen.image != {} {
+		vk.DestroyImage(ren.device, ren.offscreen.image, nil)
+	}
+	if ren.offscreen.mem != {} {
+		vk.FreeMemory(ren.device, ren.offscreen.mem, nil)
 	}
 }
 
