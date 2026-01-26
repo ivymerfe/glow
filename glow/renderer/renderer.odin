@@ -42,6 +42,8 @@ OffscreenTarget :: struct {
 
 GlowRenderer :: struct {
 	using vk_context:           VulkanContext,
+	target_width:               int,
+	target_height:              int,
 	surface:                    vk.SurfaceKHR,
 	surface_format:             vk.SurfaceFormatKHR,
 	present_mode:               vk.PresentModeKHR,
@@ -248,7 +250,7 @@ render :: proc(ren: ^GlowRenderer, push: ^PushConstants, passes: []RenderPass) {
 		srcSubresource = {aspectMask = {.COLOR}, layerCount = 1},
 		srcOffsets = [2]vk.Offset3D {
 			{0, 0, 0},
-			{i32(target_image.extent.width), i32(target_image.extent.height), 1},
+			{i32(ren.target_width), i32(ren.target_height), 1},
 		},
 		dstSubresource = {aspectMask = {.COLOR}, layerCount = 1},
 		dstOffsets = [2]vk.Offset3D {

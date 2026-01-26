@@ -12,11 +12,14 @@ RenderPass :: struct {
 record_pass_commands :: proc(pass: ^RenderPass, cmd: vk.CommandBuffer, push: ^PushConstants) {
 	vk.CmdBindPipeline(cmd, .GRAPHICS, pass.pipeline)
 
+	width := pass.ren.target_width
+	height := pass.ren.target_height
+
 	viewport := vk.Viewport {
 		x        = 0.0,
 		y        = 0.0,
-		width    = OFFSCREEN_WIDTH,
-		height   = OFFSCREEN_HEIGHT,
+		width    = f32(width),
+		height   = f32(height),
 		minDepth = 0.0,
 		maxDepth = 1.0,
 	}
@@ -24,10 +27,7 @@ record_pass_commands :: proc(pass: ^RenderPass, cmd: vk.CommandBuffer, push: ^Pu
 
 	scissor := vk.Rect2D {
 		offset = vk.Offset2D{x = 0, y = 0},
-		extent = vk.Extent2D {
-			width = OFFSCREEN_WIDTH,
-			height = OFFSCREEN_HEIGHT,
-		},
+		extent = vk.Extent2D{width = u32(width), height = u32(height)},
 	}
 	vk.CmdSetScissor(cmd, 0, 1, &scissor)
 
@@ -108,7 +108,7 @@ create_render_pass :: proc(pass: ^RenderPass, ren: ^GlowRenderer, module: vk.Sha
 		pName  = "psMain",
 	}
 	shader_stages := []vk.PipelineShaderStageCreateInfo{vertex_shader_info, pixel_shader_info}
-	format : vk.Format = OFFSCREEN_FORMAT
+	format: vk.Format = OFFSCREEN_FORMAT
 	pipeline_rendering_info := vk.PipelineRenderingCreateInfo {
 		sType                   = .PIPELINE_RENDERING_CREATE_INFO,
 		colorAttachmentCount    = 1,
