@@ -2,43 +2,47 @@ package glow
 
 import "base:runtime"
 import "core:log"
-
+import "core:os"
+import "core:sync"
 import "core:thread"
-
 import "core:time"
-import ren "renderer"
+
 import "vendor:sdl3"
 import vk "vendor:vulkan"
 
-import fw "file_watcher"
-
 app_context: runtime.Context
-vk_context: ren.VulkanContext
-glow: ren.GlowRenderer
-test_shader_module: vk.ShaderModule
-test_pass: ren.RenderPass
+vk_context: VulkanContext
+renderer: GlowRenderer
+glow: GlowContext
+
+compiler: GlowCompiler
+compiler_thread: ^thread.Thread
+glow_mutex: sync.Mutex
+glow_init: sync.One_Shot_Event
 
 window: ^sdl3.Window
-timer: time.Stopwatch
 
 should_present: bool
 window_width: int
 window_height: int
 
-watcher: fw.LinuxFileWatcher
-shader_wd: fw.WatchDescriptor
-watcher_thread: ^thread.Thread
+launch_time: time.Time
+got_first_frame: bool
+
+timer: time.Stopwatch
 
 SWAPCHAIN_WIDTH :: 1920
 SWAPCHAIN_HEIGHT :: 1080
+TARGET_WIDTH :: 1920
+TARGET_HEIGHT :: 1080
 
 app_init :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.AppResult {
 	context = app_context
+	launch_time = time.now()
 
-	start := time.now()
+	compiler_thread = thread.create_and_start(compiler_proc, context)
 
 	sdl3.SetHint(sdl3.HINT_APP_ID, "glow")
-	sdl3.SetHint(sdl3.HINT_VIDEO_WAYLAND_SCALE_TO_DISPLAY, "0")
 	sdl_res := sdl3.Init(sdl3.INIT_VIDEO)
 	if !sdl_res {
 		log.panic("Failed to initialize SDL3: %s", sdl3.GetError())
@@ -54,46 +58,56 @@ app_init :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 		log.panic("Failed to create SDL3 window: %s", sdl3.GetError())
 	}
 
-	elapsed := time.duration_milliseconds(time.diff(start, time.now()))
-	log.infof("SDL3 initialized in %.2f ms", elapsed)
+	sdl_init_time := time.duration_milliseconds(time.diff(launch_time, time.now()))
+	log.infof("SDL3 initialized in %.2f ms", sdl_init_time)
 
-	init_start := time.now()
+	vk_init_start := time.now()
 
 	sdl3.ShowWindow(window)
-	instance := ren.create_vk_instance()
+	instance := create_vk_instance()
 
 	surface: vk.SurfaceKHR
 	if !sdl3.Vulkan_CreateSurface(window, instance, nil, &surface) {
 		log.panic("Failed to create Vulkan surface from SDL3 window: %s", sdl3.GetError())
 	}
 
-	vk_context = ren.create_vulkan_context(instance, surface)
+	vk_context = create_vulkan_context(instance, surface)
 
-	glow = ren.create_renderer(vk_context, surface, SWAPCHAIN_WIDTH, SWAPCHAIN_HEIGHT)
+	renderer = create_renderer(vk_context, surface, SWAPCHAIN_WIDTH, SWAPCHAIN_HEIGHT)
 
-	init_elapsed := time.duration_milliseconds(time.diff(init_start, time.now()))
-	log.infof("Vulkan initialized in %.2f ms", init_elapsed)
+	vk_init_time := time.duration_milliseconds(time.diff(vk_init_start, time.now()))
+	log.infof("Vulkan initialized in %.2f ms", vk_init_time)
 
-	test_module, success := ren.load_shader_module_file(&glow, "shaders/test_shader.spv")
-	ensure(success, "Failed to load test shader module.")
-	test_shader_module = test_module
-
-	ren.create_render_pass(&test_pass, &glow, test_module)
-
-	err: fw.Err
-	watcher, err = fw.create_watcher(watch_callback)
-	if err != .NONE {
-		log.panicf("Failed to create file watcher: %s", err)
-	}
-	shader_wd, err = fw.add_file_watch(&watcher, "shaders/test.slang")
-	if err != .NONE {
-		log.panicf("Failed to add file watch: %s", err)
-	}
-	watcher_thread = thread.create_and_start(watcher_proc, app_context)
+	ctx_init_start := time.now()
+	glow = create_glow_context(vk_context, TARGET_WIDTH, TARGET_HEIGHT)
+	ctx_init_time := time.duration_milliseconds(time.diff(ctx_init_start, time.now()))
+	log.infof("Glow context initialized in %.2f ms", ctx_init_time)
 
 	time.stopwatch_start(&timer)
 	should_present = true
+	sync.one_shot_event_signal(&glow_init)
 	return .CONTINUE
+}
+
+compiler_proc :: proc() {
+	compiler_init_start := time.now()
+	compiler = create_glow_compiler()
+	compiler_init_time := time.duration_milliseconds(time.diff(compiler_init_start, time.now()))
+	log.infof("Compiler initialized in %.2f ms", compiler_init_time)
+
+	compile_start := time.now()
+	shader_content, success := os.read_entire_file("shaders/test.slang")
+	ensure(success, "Failed to read shader file")
+
+	shader := compile_program(&compiler, "shaders/test.slang", cstring(&shader_content[0]))
+	compile_time := time.duration_milliseconds(time.diff(compile_start, time.now()))
+	log.infof("Shader compiled in %.2f ms", compile_time)
+
+	sync.one_shot_event_wait(&glow_init)
+
+	sync.lock(&glow_mutex)
+	load_program(&glow, shader)
+	sync.unlock(&glow_mutex)
 }
 
 app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
@@ -101,12 +115,25 @@ app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
 	if !should_present {
 		return .CONTINUE
 	}
-	glow.target_width = window_width
-	glow.target_height = window_height
-	push: ren.PushConstants
+	push: PushConstants
 	push.time = f32(time.duration_seconds(time.stopwatch_duration(timer)))
 	push.aspect_ratio = f32(window_width) / f32(window_height)
-	ren.render(&glow, &push, []ren.RenderPass{test_pass})
+	render_info := RenderInfo {
+		width     = u32(min(TARGET_WIDTH, window_width)),
+		height    = u32(min(TARGET_HEIGHT, window_height)),
+		constants = push,
+	}
+
+	sync.lock(&glow_mutex)
+	if glow.program_loaded {
+		render(&renderer, &glow, &render_info)
+		if !got_first_frame {
+			got_first_frame = true
+			elapsed := time.duration_milliseconds(time.diff(launch_time, time.now()))
+			log.infof("First frame presented in %.2f ms", elapsed)
+		}
+	}
+	sync.unlock(&glow_mutex)
 	return .CONTINUE
 }
 
@@ -130,41 +157,15 @@ app_event :: proc "c" (userdata: rawptr, event: ^sdl3.Event) -> sdl3.AppResult {
 app_quit :: proc "c" (appstate: rawptr, result: sdl3.AppResult) {
 	context = app_context
 
-	fw.destroy_watcher(&watcher)
-	thread.join(watcher_thread)
-
-	vk.DeviceWaitIdle(glow.device)
-
-	ren.destroy_render_pass(&test_pass)
-	vk.DestroyShaderModule(glow.device, test_shader_module, nil)
-	ren.destroy_renderer(&glow)
-	ren.destroy_vulkan_context(&vk_context)
+	vk.DeviceWaitIdle(vk_context.device)
+	destroy_glow_context(&glow)
+	destroy_renderer(&renderer)
+	destroy_vulkan_context(&vk_context)
 	vk.DestroyInstance(vk_context.instance, nil)
 
 	sdl3.DestroyWindow(window)
 	sdl3.Quit()
 	log.info("Goodbye")
-}
-
-watch_callback :: proc(event: ^fw.WatchEvent) {
-	if .MODIFY in event.mask {
-		log.info("Shader modified")
-	}
-}
-
-watcher_proc :: proc() {
-	log.info("Waiting for file changes")
-	for {
-		should_close, err := fw.wait_for_events(&watcher)
-		if err != .NONE {
-			log.infof("Error waiting for file events: %s", err)
-			break
-		}
-		if should_close {
-			break
-		}
-		fw.dispatch_events(&watcher)
-	}
 }
 
 main :: proc() {

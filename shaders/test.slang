@@ -1,5 +1,3 @@
-module rendering;
-
 struct PushConstants
 {
     float4 camera_pos;
@@ -24,22 +22,6 @@ struct VertexOutput
     float2 uv : POS_UV;
 }
 
-static const float2 TRI[3] = {
-    float2(-1.0, -1.0),
-    float2(+3.0, -1.0),
-    float2(-1.0, +3.0),
-};
-
-[shader("vertex")]
-VertexOutput vsMain(uint vertexIndex: SV_VertexID)
-{
-    VertexOutput out;
-    out.pos.xy = TRI[vertexIndex];
-    out.uv.x = out.pos.x * 0.5 * scene.aspect_ratio;
-    out.uv.y = out.pos.y * 0.5;
-    return out;
-}
-
 const static float PI = 3.1415926;
 
 float3 palette(float t)
@@ -58,7 +40,7 @@ float g(float3 p, float s)
 }
 
 [shader("pixel")]
-float4 psMain(VertexOutput in) : SV_Target0
+float4 main(VertexOutput in) : SV_Target0
 {
     float2 uv = in.uv;
     float3 dir = normalize(float3(uv.x, uv.y, 1.0));
