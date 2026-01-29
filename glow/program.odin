@@ -2,24 +2,11 @@ package glow
 
 import "core:log"
 import "core:slice"
-import "core:time"
 
 import slang "odin_slang"
 
-
-GlowCompiler :: struct {
-	global_session: ^slang.IGlobalSession,
-	session:        ^slang.ISession,
-}
-
 GlowProgram :: struct {
 	code: ^slang.IBlob,
-}
-
-slang_check :: proc(result: slang.Result, loc := #caller_location) {
-	if result != slang.OK {
-		log.panicf("Slang error: %d", int(result), loc)
-	}
 }
 
 diagnostics_check :: proc(diagnostics: ^slang.IBlob, loc := #caller_location) {
@@ -32,15 +19,12 @@ diagnostics_check :: proc(diagnostics: ^slang.IBlob, loc := #caller_location) {
 	}
 }
 
-create_glow_compiler :: proc() -> GlowCompiler {
-	comp: GlowCompiler
-
-	slang_check(slang.createGlobalSession(slang.API_VERSION, &comp.global_session))
+create_slang_session :: proc() -> (session: ^slang.ISession) {
 	target_desc := slang.TargetDesc {
 		structureSize = size_of(slang.TargetDesc),
 		format        = .SPIRV,
 		flags         = {.GENERATE_SPIRV_DIRECTLY},
-		profile       = comp.global_session->findProfile("sm_6_0"),
+		profile       = g_ctx.slang->findProfile("sm_6_0"),
 	}
 
 	compiler_option_entries := [?]slang.CompilerOptionEntry {
@@ -53,21 +37,19 @@ create_glow_compiler :: proc() -> GlowCompiler {
 		compilerOptionEntries    = &compiler_option_entries[0],
 		compilerOptionEntryCount = 1,
 	}
-
-	slang_check(comp.global_session->createSession(session_desc, &comp.session))
-
-	return comp
+	slang_check(g_ctx.slang->createSession(session_desc, &session))
+	return
 }
 
 compile_program :: proc(
-	comp: ^GlowCompiler,
+	session: ^slang.ISession,
 	path: cstring,
 	source: cstring,
 ) -> (
 	program: GlowProgram,
 ) {
 	diagnostics: ^slang.IBlob
-	slang_module := comp.session->loadModuleFromSourceString("shader", path, source, &diagnostics)
+	slang_module := session->loadModuleFromSourceString("shader", path, source, &diagnostics)
 	diagnostics_check(diagnostics)
 
 	if slang_module == nil {
@@ -85,7 +67,7 @@ compile_program :: proc(
 
 	composed_program: ^slang.IComponentType
 	slang_check(
-		comp.session->createCompositeComponentType(
+		session->createCompositeComponentType(
 			&components[0],
 			len(components),
 			&composed_program,
@@ -110,9 +92,4 @@ compile_program :: proc(
 	}
 	program.code = target_code
 	return
-}
-
-destroy_glow_compiler :: proc(comp: ^GlowCompiler) {
-	comp.session->release()
-	comp.global_session->release()
 }
