@@ -4,11 +4,19 @@ import "base:runtime"
 import "core:log"
 import "core:time"
 
+import "core:os"
+import "core:sync"
+import "core:thread"
+
 import slang "odin_slang"
 import "vendor:sdl3"
 import vk "vendor:vulkan"
 
 g_win: GlowWindow
+g_mtx: sync.Mutex
+g_should_exit: bool
+g_render_thread: ^thread.Thread
+got_program: sync.One_Shot_Event
 
 launch_time: time.Time
 
@@ -38,11 +46,72 @@ app_init :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 	win_init_time := time.duration_milliseconds(time.diff(win_start, time.now()))
 	log.infof("Window and Vulkan initialized in %.2f ms", win_init_time)
 
+	g_render_thread = thread.create_and_start(render_proc, context)
+	thread.create_and_start(compiler_proc, context)
+
 	return .CONTINUE
+}
+
+wait_for_some_window :: proc() {
+	vk_try(
+		vk.WaitForFences(
+			g_ctx.vkc.device,
+			u32(len(g_ctx.fences)),
+			raw_data(g_ctx.fences),
+			false,
+			max(u64),
+		),
+	)
+}
+
+render_proc :: proc() {
+	sync.one_shot_event_wait(&got_program)
+
+	time.stopwatch_start(&g_win.timer)
+	push: PushConstants
+
+	for !sync.atomic_load(&g_should_exit) {
+		wait_for_some_window()
+
+		push.time = f32(time.duration_seconds(time.stopwatch_duration(g_win.timer)))
+		push.aspect_ratio = f32(g_win.width) / f32(g_win.height)
+		render_info := RenderInfo {
+			width     = u32(min(TARGET_WIDTH, g_win.width)),
+			height    = u32(min(TARGET_HEIGHT, g_win.height)),
+			constants = push,
+		}
+		rendered := false
+
+		sync.lock(&g_mtx)
+		if g_win.glow.program_loaded {
+			rendered |= render(&g_win.ren, &g_win.glow, &render_info)
+		}
+		sync.unlock(&g_mtx)
+
+		if !rendered {
+			time.sleep(time.Millisecond * 1)
+		}
+	}
+}
+
+compiler_proc :: proc() {
+	compile_start := time.now()
+	shader_content, success := os.read_entire_file("shaders/test.slang")
+	ensure(success, "Failed to read shader file")
+
+	shader := compile_program(g_win.session, "shaders/test.slang", cstring(&shader_content[0]))
+	compile_time := time.duration_milliseconds(time.diff(compile_start, time.now()))
+	log.infof("Shader compiled in %.2f ms", compile_time)
+
+	sync.lock(&g_mtx)
+	load_program(&g_win.glow, shader)
+	sync.unlock(&g_mtx)
+	sync.one_shot_event_signal(&got_program)
 }
 
 app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
 	context = g_ctx.app
+	time.sleep(time.Millisecond * 2)
 	return .CONTINUE
 }
 
@@ -75,9 +144,12 @@ app_quit :: proc "c" (appstate: rawptr, result: sdl3.AppResult) {
 	context = g_ctx.app
 
 	// Destroy threads
-	exit_window_threads(&g_win)
+	sync.atomic_store(&g_should_exit, true)
+	sync.one_shot_event_signal(&got_program)
+	thread.join(g_render_thread)
 
 	vk.DeviceWaitIdle(g_ctx.vkc.device)
+
 	// Destroy windows
 	destroy_window(&g_win)
 

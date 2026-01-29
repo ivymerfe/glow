@@ -90,15 +90,22 @@ destroy_renderer :: proc(ren: ^GlowRenderer) {
 	vk.DestroyCommandPool(ren.device, ren.cmd_pool, nil)
 }
 
+wait_renderer :: proc(ren: ^GlowRenderer) {
+	vk_try(vk.WaitForFences(ren.device, 1, &ren.render_fence, true, max(u64)))
+}
+
 resize_swapchain :: proc(ren: ^GlowRenderer, new_width: int, new_height: int) {
-	//vk_try(vk.WaitForFences(ren.device, 1, &ren.render_fence, true, max(u64)))
+	wait_renderer(ren)
 	ren.swapchain_width = new_width
 	ren.swapchain_height = new_height
 	recreate_swapchain(ren)
 }
 
-render :: proc(ren: ^GlowRenderer, glow_context: ^GlowContext, render_info: ^RenderInfo) {
-	vk_try(vk.WaitForFences(ren.device, 1, &ren.render_fence, true, max(u64)))
+render :: proc(ren: ^GlowRenderer, glow_context: ^GlowContext, render_info: ^RenderInfo) -> bool {
+	fence_status := vk.GetFenceStatus(ren.device, ren.render_fence)
+	if fence_status == .NOT_READY {
+		return false
+	}
 	swapchain := ren.swapchain
 
 	sem_image_available := ren.image_available_semaphore
@@ -106,15 +113,17 @@ render :: proc(ren: ^GlowRenderer, glow_context: ^GlowContext, render_info: ^Ren
 	acquire_result := vk.AcquireNextImageKHR(
 		ren.device,
 		swapchain.h,
-		max(u64),
+		0,
 		sem_image_available,
 		{},
 		&image_index,
 	)
 	#partial switch acquire_result {
+	case .TIMEOUT:
+		return false
 	case .ERROR_OUT_OF_DATE_KHR:
 		recreate_swapchain(ren)
-		return
+		return false
 	case .SUCCESS, .SUBOPTIMAL_KHR:
 	case:
 		log.panicf("vulkan: acquire next image failure: %v", acquire_result)
@@ -130,7 +139,7 @@ render :: proc(ren: ^GlowRenderer, glow_context: ^GlowContext, render_info: ^Ren
 	vk.BeginCommandBuffer(cmd_buffer, &begin_info)
 
 	draw_context(glow_context, cmd_buffer, render_info)
-	
+
 	transition_image_layout(
 		cmd_buffer,
 		swapchain_image,
@@ -207,6 +216,7 @@ render :: proc(ren: ^GlowRenderer, glow_context: ^GlowContext, render_info: ^Ren
 	case:
 		log.panicf("vulkan: present failure: %v", present_result)
 	}
+	return true
 }
 
 recreate_swapchain :: proc(ren: ^GlowRenderer) {
