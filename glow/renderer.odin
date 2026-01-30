@@ -113,7 +113,7 @@ render :: proc(ren: ^GlowRenderer, glow_context: ^GlowContext, render_info: ^Ren
 	acquire_result := vk.AcquireNextImageKHR(
 		ren.device,
 		swapchain.h,
-		0,
+		max(u64), // less cpu
 		sem_image_available,
 		{},
 		&image_index,
