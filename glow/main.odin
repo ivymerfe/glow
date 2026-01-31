@@ -50,6 +50,7 @@ app_init :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 	log.infof("Window and Vulkan initialized in %.2f ms", win_init_time)
 
 	g_render_thread = thread.create_and_start(render_proc, context)
+
 	thread.create_and_start(compiler_proc, context)
 
 	return .CONTINUE
@@ -59,11 +60,7 @@ app_init :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
 	context = g_ctx.app
 
-	cmd, success := read_command()
-	if success {
-
-	}
-
+	
 	time.sleep(time.Millisecond * 1)
 	return .CONTINUE
 }
