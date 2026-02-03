@@ -11,7 +11,7 @@ when ODIN_OS == .Darwin {
 }
 
 when ODIN_OS == .Linux {
-	foreign import libslang "lib/libslang-compiler.so"
+	foreign import libslang "lib/libslang-compiler.so.0.2026.1.1"
 }
 
 // Note(Dragos): This is defined to be "pointer size". So ummmm check later
