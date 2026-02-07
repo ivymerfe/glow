@@ -9,6 +9,12 @@ GlowProgram :: struct {
 	code: ^slang.IBlob,
 }
 
+ProgramInfo :: struct {
+	version: u32,
+	path:    string,
+	source:  string,
+}
+
 diagnostics_check :: proc(diagnostics: ^slang.IBlob, loc := #caller_location) {
 	if diagnostics != nil {
 		buffer := slice.bytes_from_ptr(
@@ -41,13 +47,10 @@ create_slang_session :: proc() -> (session: ^slang.ISession) {
 	return
 }
 
-compile_program :: proc(
-	session: ^slang.ISession,
-	path: cstring,
-	source: cstring,
-) -> (
-	program: GlowProgram,
-) {
+compile_program :: proc(path: cstring, source: cstring) -> (program: GlowProgram) {
+	session := create_slang_session()
+	defer session->release()
+	
 	diagnostics: ^slang.IBlob
 	slang_module := session->loadModuleFromSourceString("shader", path, source, &diagnostics)
 	diagnostics_check(diagnostics)
@@ -92,4 +95,11 @@ compile_program :: proc(
 	}
 	program.code = target_code
 	return
+}
+
+free_program :: proc(program: ^GlowProgram) {
+	if program.code != nil {
+		program.code->release()
+		program.code = nil
+	}
 }

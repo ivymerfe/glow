@@ -12,9 +12,11 @@ import slang "odin_slang"
 import "vendor:sdl3"
 import vk "vendor:vulkan"
 
-g_win: GlowWindow
-g_render_mtx: sync.Mutex
-g_destroy_mtx: sync.Mutex
+g_windows: map[u32]^GlowWindow
+g_windowIdMap: map[sdl3.WindowID]u32
+g_windowFences: [dynamic]vk.Fence
+
+g_window_mtx: sync.Mutex
 g_should_exit: bool
 g_render_thread: ^thread.Thread
 
@@ -44,23 +46,98 @@ app_init :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 	slang_init_time := time.duration_milliseconds(time.diff(slang_init_start, time.now()))
 	log.infof("Slang initialized in %.2f ms", slang_init_time)
 
-	win_start := time.now()
-	create_window(&g_win)
-	win_init_time := time.duration_milliseconds(time.diff(win_start, time.now()))
-	log.infof("Window and Vulkan initialized in %.2f ms", win_init_time)
-
 	g_render_thread = thread.create_and_start(render_proc, context)
-
-	thread.create_and_start(compiler_proc, context)
 
 	return .CONTINUE
 }
 
+create_app_window :: proc(window_id: u32) {
+	sync.lock(&g_window_mtx)
+	defer sync.unlock(&g_window_mtx)
+
+	_, ok := g_windows[window_id]
+	if ok {
+		return
+	}
+
+	win := new(GlowWindow)
+
+	create_window(window_id, win)
+	g_windows[window_id] = win
+	g_windowIdMap[win.sdl_id] = window_id
+
+	append(&g_windowFences, win.ren.render_fence)
+}
+
+destroy_app_window :: proc(window_id: u32) {
+	sync.lock(&g_window_mtx)
+	defer sync.unlock(&g_window_mtx)
+
+	win := g_windows[window_id]
+	if win == nil {
+		return
+	}
+
+	window_fence := win.ren.render_fence
+	fence_index := -1
+	for fence, i in g_windowFences {
+		if fence == window_fence {
+			fence_index = i
+			break
+		}
+	}
+	if fence_index != -1 {
+		unordered_remove(&g_windowFences, fence_index)
+	}
+
+	destroy_window(win)
+	delete_key(&g_windowIdMap, win.sdl_id)
+	delete_key(&g_windows, window_id)
+	free(win)
+}
+
+command_handler :: proc(cmd_union: GlowCommand) {
+	switch cmd in cmd_union {
+	case CmdWindowCreate:
+		create_app_window(cmd.window_id)
+	case CmdWindowDestroy:
+		destroy_app_window(cmd.window_id)
+	case CmdWindowVisible:
+		win := g_windows[cmd.window_id]
+		if win != nil {
+			if cmd.visible {
+				sdl3.ShowWindow(win.h)
+			} else {
+				sdl3.HideWindow(win.h)
+			}
+			sync.atomic_store(&win.suspended, !cmd.visible)
+		}
+	case CmdWindowFullscreen:
+		win := g_windows[cmd.window_id]
+		if win != nil {
+			sdl3.SetWindowFullscreen(win.h, cmd.fullscreen)
+		}
+	case CmdWindowSuspend:
+		win := g_windows[cmd.window_id]
+		if win != nil {
+			sync.atomic_store(&win.suspended, cmd.suspend)
+		}
+	case CmdWindowProgram:
+		win := g_windows[cmd.window_id]
+		if win != nil {
+			program_info := ProgramInfo {
+				path   = transmute(string)cmd.path,
+				source = transmute(string)cmd.source,
+			}
+			compiler_worker_submit(&win.compiler_worker, program_info)
+		}
+	}
+}
 
 app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
 	context = g_ctx.app
+	poll_commands(command_handler)
 
-	
 	time.sleep(time.Millisecond * 1)
 	return .CONTINUE
 }
@@ -72,20 +149,29 @@ app_event :: proc "c" (userdata: rawptr, event: ^sdl3.Event) -> sdl3.AppResult {
 	case .QUIT:
 		return .SUCCESS
 	case .KEY_DOWN:
+		window_id := g_windowIdMap[event.window.windowID]
+		win := g_windows[window_id]
+		if win == nil {
+			break
+		}
 		if event.key.key == sdl3.K_Q {
-			return .SUCCESS
+			destroy_app_window(window_id)
 		}
 		if event.key.key == sdl3.K_F {
-			flags := sdl3.GetWindowFlags(g_win.h)
+			flags := sdl3.GetWindowFlags(win.h)
 			if .FULLSCREEN in flags {
-				sdl3.SetWindowFullscreen(g_win.h, false)
+				sdl3.SetWindowFullscreen(win.h, false)
 			} else {
-				sdl3.SetWindowFullscreen(g_win.h, true)
+				sdl3.SetWindowFullscreen(win.h, true)
 			}
 		}
 	case .WINDOW_PIXEL_SIZE_CHANGED:
-		g_win.width = int(event.window.data1)
-		g_win.height = int(event.window.data2)
+		window_id := g_windowIdMap[event.window.windowID]
+		win := g_windows[window_id]
+		if win != nil {
+			win.width = int(event.window.data1)
+			win.height = int(event.window.data2)
+		}
 	}
 	return .CONTINUE
 }
@@ -106,29 +192,28 @@ wait_for_some_window :: proc() {
 }
 
 render_proc :: proc() {
-	time.stopwatch_start(&g_win.timer)
 	push: PushConstants
 
 	for !sync.atomic_load(&g_should_exit) {
-		sync.lock(&g_destroy_mtx)
+		sync.lock(&g_window_mtx)
+
 		wait_for_some_window()
 
-		push.time = f32(time.duration_seconds(time.stopwatch_duration(g_win.timer)))
-		push.aspect_ratio = f32(g_win.width) / f32(g_win.height)
-		render_info := RenderInfo {
-			width     = u32(min(TARGET_WIDTH, g_win.width)),
-			height    = u32(min(TARGET_HEIGHT, g_win.height)),
-			constants = push,
-		}
 		rendered := false
-
-		sync.lock(&g_render_mtx)
-		if g_win.glow.program_loaded {
-			rendered |= render(&g_win.ren, &g_win.glow, &render_info)
+		for _, win in g_windows {
+			if sync.atomic_load(&win.suspended) {
+				continue
+			}
+			push.time = f32(time.duration_seconds(time.stopwatch_duration(win.timer)))
+			push.aspect_ratio = f32(win.width) / f32(win.height)
+			render_info := RenderInfo {
+				width     = u32(min(TARGET_WIDTH, win.width)),
+				height    = u32(min(TARGET_HEIGHT, win.height)),
+				constants = push,
+			}
+			rendered |= render(&win.ren, &win.glow, &render_info)
 		}
-		sync.unlock(&g_render_mtx)
-
-		sync.unlock(&g_destroy_mtx)
+		sync.unlock(&g_window_mtx)
 
 		if !rendered {
 			time.sleep(time.Millisecond * 1)
@@ -136,34 +221,23 @@ render_proc :: proc() {
 	}
 }
 
-compiler_proc :: proc() {
-	compile_start := time.now()
-	shader_content, success := os.read_entire_file("shaders/test.slang")
-	ensure(success, "Failed to read shader file")
-
-	shader := compile_program(g_win.session, "shaders/test.slang", cstring(&shader_content[0]))
-	compile_time := time.duration_milliseconds(time.diff(compile_start, time.now()))
-	log.infof("Shader compiled in %.2f ms", compile_time)
-
-	sync.lock(&g_render_mtx)
-	load_program(&g_win.glow, shader)
-	sync.unlock(&g_render_mtx)
-}
-
 app_quit :: proc "c" (appstate: rawptr, result: sdl3.AppResult) {
 	context = g_ctx.app
 
-	// Destroy threads
 	sync.atomic_store(&g_should_exit, true)
-	thread.join(g_render_thread)
+	thread.destroy(g_render_thread)
 
-	vk.DeviceWaitIdle(g_ctx.vkc.device)
+	if g_ctx.vkc.device != {} {
+		vk.DeviceWaitIdle(g_ctx.vkc.device)
 
-	// Destroy windows
-	destroy_window(&g_win)
+		for _, win in g_windows {
+			destroy_window(win)
+		}
 
-	destroy_vulkan_context(&g_ctx.vkc)
+		destroy_vulkan_context(&g_ctx.vkc)
+	}
 	vk.DestroyInstance(g_ctx.instance, nil)
+
 	g_ctx.slang->release()
 
 	sdl3.Quit()

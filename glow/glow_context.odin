@@ -1,6 +1,7 @@
 package glow
 
 import "core:log"
+import "core:sync"
 
 import vk "vendor:vulkan"
 
@@ -28,14 +29,17 @@ GlowImage :: struct {
 }
 
 GlowContext :: struct {
-	using vk_context: VulkanContext,
-	vs_module:        vk.ShaderModule,
-	ps_module:        vk.ShaderModule,
-	descriptor_pool:  vk.DescriptorPool,
-	target:           GlowImage,
-	program_loaded:   bool,
-	pipeline:         vk.Pipeline,
-	layout:           vk.PipelineLayout,
+	using vk_context:      VulkanContext,
+	target:                GlowImage,
+	descriptor_pool:       vk.DescriptorPool,
+	vs_module:             vk.ShaderModule,
+	ps_module:             vk.ShaderModule,
+	pipeline:              vk.Pipeline,
+	layout:                vk.PipelineLayout,
+	program:               GlowProgram,
+	program_loaded:        bool,
+	program_should_reload: bool,
+	program_mtx:           sync.Mutex,
 }
 
 RenderInfo :: struct {
@@ -114,13 +118,19 @@ load_program :: proc(ctx: ^GlowContext, program: GlowProgram) {
 		vk.DestroyPipelineLayout(ctx.device, ctx.layout, nil)
 	}
 	create_pipeline(ctx)
+	free_program(&ctx.program)
 	ctx.program_loaded = true
 }
 
-draw_context :: proc(ctx: ^GlowContext, cmd: vk.CommandBuffer, render_info: ^RenderInfo) {
-	if !ctx.program_loaded {
-		return
+maybe_load_program :: proc(ctx: ^GlowContext) {
+	if sync.atomic_exchange(&ctx.program_should_reload, false) {
+		sync.lock(&ctx.program_mtx)
+		load_program(ctx, ctx.program)
+		sync.unlock(&ctx.program_mtx)
 	}
+}
+
+draw_context :: proc(ctx: ^GlowContext, cmd: vk.CommandBuffer, render_info: ^RenderInfo) {
 	target := &ctx.target
 
 	src_stage := vk.PipelineStageFlags2.TOP_OF_PIPE

@@ -92,6 +92,7 @@ destroy_renderer :: proc(ren: ^GlowRenderer) {
 
 wait_renderer :: proc(ren: ^GlowRenderer) {
 	vk_try(vk.WaitForFences(ren.device, 1, &ren.render_fence, true, max(u64)))
+	vk_try(vk.QueueWaitIdle(ren.present_queue))
 }
 
 resize_swapchain :: proc(ren: ^GlowRenderer, new_width: int, new_height: int) {
@@ -106,6 +107,11 @@ render :: proc(ren: ^GlowRenderer, glow_context: ^GlowContext, render_info: ^Ren
 	if fence_status == .NOT_READY {
 		return false
 	}
+	maybe_load_program(glow_context)
+	if !glow_context.program_loaded {
+		return false
+	}
+	
 	swapchain := ren.swapchain
 
 	sem_image_available := ren.image_available_semaphore
