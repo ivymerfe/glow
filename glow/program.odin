@@ -15,6 +15,12 @@ ProgramInfo :: struct {
 	source:  string,
 }
 
+slang_check :: proc(result: slang.Result, loc := #caller_location) {
+	if result != slang.OK {
+		log.panicf("Slang error: %d", int(result), loc)
+	}
+}
+
 diagnostics_check :: proc(diagnostics: ^slang.IBlob, loc := #caller_location) {
 	if diagnostics != nil {
 		buffer := slice.bytes_from_ptr(
@@ -47,7 +53,7 @@ create_slang_session :: proc() -> (session: ^slang.ISession) {
 	return
 }
 
-compile_program :: proc(path: cstring, source: cstring) -> (program: GlowProgram) {
+compile_program :: proc(path: cstring, source: cstring) -> (program: GlowProgram, success: bool) {
 	session := create_slang_session()
 	defer session->release()
 	
@@ -94,6 +100,7 @@ compile_program :: proc(path: cstring, source: cstring) -> (program: GlowProgram
 		return
 	}
 	program.code = target_code
+	success = true
 	return
 }
 

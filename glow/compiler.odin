@@ -80,13 +80,15 @@ compiler_worker_proc :: proc(raw: rawptr) {
         log.infof("Compiling shader: %s", info.path)
         time_start := time.now()
 
-		// NOTE: clone_to_cstring allocates; free it.
 		path_c := strings.clone_to_cstring(info.path)
 		source_c := strings.clone_to_cstring(info.source)
 		defer delete_cstring(path_c)
 		defer delete_cstring(source_c)
 
-		program := compile_program(path_c, source_c)
+		program, success := compile_program(path_c, source_c)
+		if !success {
+			continue
+		}
 
         elapsed := time.duration_milliseconds(time.diff(time_start, time.now()))
         log.infof("Compilation finished in %.2f milliseconds", elapsed)

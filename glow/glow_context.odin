@@ -53,6 +53,8 @@ TARGET_FORMAT: vk.Format = .R32G32B32A32_SFLOAT
 MAX_DESCRIPTOR_SETS :: 128
 MAX_STORAGE_IMAGES :: 256
 
+VS_FULLSCREEN_SPV: []u8 = #load("shaders/vs_fullscreen.spv")
+
 create_glow_context :: proc(
 	vkc: VulkanContext,
 	target_width: u32,
@@ -77,7 +79,7 @@ create_glow_context :: proc(
 	ctx.target = create_image(&ctx, target_width, target_height)
 
 	vs_loaded: bool
-	ctx.vs_module, vs_loaded = load_shader_from_file(&ctx, "shaders/vs_fullscreen.spv")
+	ctx.vs_module, vs_loaded = load_shader_from_memory(&ctx, VS_FULLSCREEN_SPV)
 	if !vs_loaded {
 		log.panic("Failed to load vertex shader")
 	}

@@ -1,3 +1,5 @@
 *.spv
 *.bin
 *.so.*
+node_modules
+out

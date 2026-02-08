@@ -9,10 +9,14 @@ load_shader_from_file :: proc(vkc: ^VulkanContext, filename: string) -> (vk.Shad
 	if !success {
 		return vk.ShaderModule{}, false
 	}
+	return load_shader_from_memory(vkc, bytes)
+}
+
+load_shader_from_memory :: proc(vkc: ^VulkanContext, code: []u8) -> (vk.ShaderModule, bool) {
 	create_info := vk.ShaderModuleCreateInfo {
 		sType    = .SHADER_MODULE_CREATE_INFO,
-		codeSize = len(bytes),
-		pCode    = auto_cast raw_data(bytes),
+		codeSize = len(code),
+		pCode    = auto_cast raw_data(code),
 	}
 	module: vk.ShaderModule
 	result := vk.CreateShaderModule(vkc.device, &create_info, nil, &module)

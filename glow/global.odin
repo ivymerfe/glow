@@ -19,9 +19,3 @@ GlobalContext :: struct {
 }
 
 g_ctx: GlobalContext
-
-slang_check :: proc(result: slang.Result, loc := #caller_location) {
-	if result != slang.OK {
-		log.panicf("Slang error: %d", int(result), loc)
-	}
-}
