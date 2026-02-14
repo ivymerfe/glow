@@ -3,3 +3,4 @@
 *.so.*
 node_modules
 out
+*.vsix
