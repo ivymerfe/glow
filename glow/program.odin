@@ -2,6 +2,7 @@ package glow
 
 import "core:log"
 import "core:slice"
+import "core:time"
 
 import slang "odin_slang"
 
@@ -21,13 +22,13 @@ slang_check :: proc(result: slang.Result, loc := #caller_location) {
 	}
 }
 
-diagnostics_check :: proc(diagnostics: ^slang.IBlob, loc := #caller_location) {
+diagnostics_check :: proc(path: cstring, diagnostics: ^slang.IBlob, loc := #caller_location) {
 	if diagnostics != nil {
 		buffer := slice.bytes_from_ptr(
 			diagnostics->getBufferPointer(),
 			int(diagnostics->getBufferSize()),
 		)
-		log.errorf("Slang: %s", string(buffer), loc)
+		log.debugf("[%s]: %s", path, string(buffer), loc)
 	}
 }
 
@@ -54,22 +55,25 @@ create_slang_session :: proc() -> (session: ^slang.ISession) {
 }
 
 compile_program :: proc(path: cstring, source: cstring) -> (program: GlowProgram, success: bool) {
+	time_start := time.now()
+	defer {
+		elapsed := time.duration_milliseconds(time.diff(time_start, time.now()))
+		log.debugf("[%s] -> %.2f ms", path, elapsed)
+	}
+
 	session := create_slang_session()
 	defer session->release()
-	
+
 	diagnostics: ^slang.IBlob
 	slang_module := session->loadModuleFromSourceString("shader", path, source, &diagnostics)
-	diagnostics_check(diagnostics)
-
+	diagnostics_check(path, diagnostics)
 	if slang_module == nil {
 		return
 	}
-
 	fragment_entry: ^slang.IEntryPoint
 	slang_module->findEntryPointByName("main", &fragment_entry)
-
 	if fragment_entry == nil {
-		log.error("Failed to find fragment entry point")
+		log.debugf("[%s] failed to find fragment entry point", path)
 		return
 	}
 	components: [2]^slang.IComponentType = {slang_module, fragment_entry}
@@ -83,19 +87,19 @@ compile_program :: proc(path: cstring, source: cstring) -> (program: GlowProgram
 			&diagnostics,
 		),
 	)
-	diagnostics_check(diagnostics)
+	diagnostics_check(path, diagnostics)
 	if composed_program == nil {
-		log.error("Failed to create composed program")
 		return
 	}
-
 	linked_program: ^slang.IComponentType
 	slang_check(composed_program->link(&linked_program, &diagnostics))
-	diagnostics_check(diagnostics)
-
+	diagnostics_check(path, diagnostics)
+	if linked_program == nil {
+		return
+	}
 	target_code: ^slang.IBlob
 	slang_check(linked_program->getTargetCode(0, &target_code, &diagnostics))
-	diagnostics_check(diagnostics)
+	diagnostics_check(path, diagnostics)
 	if target_code == nil {
 		return
 	}
@@ -110,3 +114,4 @@ free_program :: proc(program: ^GlowProgram) {
 		program.code = nil
 	}
 }
+

@@ -23,13 +23,11 @@ CmdWindowVisible :: struct {
 	window_id: u32,
 	visible:   bool,
 }
-CmdWindowFullscreen :: struct {
-	window_id:  u32,
-	fullscreen: bool,
-}
-CmdWindowSuspend :: struct {
+CmdWindowToggleFullscreen :: struct {
 	window_id: u32,
-	suspend:   bool,
+}
+CmdWindowToggleSuspend :: struct {
+	window_id: u32,
 }
 
 // Wire format for PROGRAM payload:
@@ -51,8 +49,8 @@ GlowCommand :: union {
 	CmdWindowCreate,
 	CmdWindowDestroy,
 	CmdWindowVisible,
-	CmdWindowFullscreen,
-	CmdWindowSuspend,
+	CmdWindowToggleFullscreen,
+	CmdWindowToggleSuspend,
 	CmdWindowProgram,
 }
 
@@ -153,15 +151,13 @@ decode_command :: proc(typ: GlowCommandType, payload: []u8) -> GlowCommand {
 
 	case .WINDOW_FULLSCREEN:
 		window_id := read_u32_le_cursor(payload, &c)
-		full_u8 := read_u8(payload, &c)
 		ensure(c == len(payload), "Extra bytes in WINDOW_FULLSCREEN payload")
-		return CmdWindowFullscreen{window_id = window_id, fullscreen = full_u8 != 0}
+		return CmdWindowToggleFullscreen{window_id = window_id}
 
 	case .WINDOW_SUSPEND:
 		window_id := read_u32_le_cursor(payload, &c)
-		suspend_u8 := read_u8(payload, &c)
 		ensure(c == len(payload), "Extra bytes in WINDOW_SUSPEND payload")
-		return CmdWindowSuspend{window_id = window_id, suspend = suspend_u8 != 0}
+		return CmdWindowToggleSuspend{window_id = window_id}
 
 	case .WINDOW_PROGRAM:
 		window_id := read_u32_le_cursor(payload, &c)
@@ -219,3 +215,4 @@ poll_commands :: proc(cb: Command_Callback) {
 
 	process_buffer(cb)
 }
+

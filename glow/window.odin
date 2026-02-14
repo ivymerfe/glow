@@ -1,6 +1,7 @@
 package glow
 
 import "core:log"
+import "core:sync"
 import "core:time"
 
 import "vendor:sdl3"
@@ -47,10 +48,22 @@ create_window :: proc(window_id: u32, win: ^GlowWindow) {
 
 destroy_window :: proc(win: ^GlowWindow) {
 	compiler_worker_stop(&win.compiler_worker)
-	
+
 	wait_renderer(&win.ren)
 	destroy_glow_context(&win.glow)
 	destroy_renderer(&win.ren)
 
 	sdl3.DestroyWindow(win.h)
 }
+
+window_toggle_suspended :: proc(win: ^GlowWindow) {
+	suspended := sync.atomic_load(&win.suspended)
+	if suspended {
+		sync.atomic_store(&win.suspended, false)
+		time.stopwatch_start(&win.timer)
+	} else {
+		sync.atomic_store(&win.suspended, true)
+		time.stopwatch_stop(&win.timer)
+	}
+}
+

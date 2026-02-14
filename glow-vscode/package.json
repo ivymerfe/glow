@@ -1,20 +1,56 @@
 {
   "name": "glow",
   "displayName": "Glow",
+  "author": {
+    "name": "ivy"
+  },
   "version": "1.0.0",
   "module": "src/extension.ts",
   "type": "module",
   "private": true,
   "main": "./out/extension.js",
   "activationEvents": [
-    "onStartupFinished",
-    "onCommand:glow.previewShader"
+    "onStartupFinished"
   ],
   "contributes": {
     "commands": [
       {
-        "command": "glow.previewShader",
-        "title": "Glow: Preview Shader"
+        "command": "glow.togglePreview",
+        "title": "Glow: Toggle Preview"
+      },
+      {
+        "command": "glow.fullscreenWindow",
+        "title": "Glow: Toggle Fullscreen Preview"
+      },
+      {
+        "command": "glow.hideOrShowWindow",
+        "title": "Glow: Hide/Show Preview Window"
+      },
+      {
+        "command": "glow.suspendWindow",
+        "title": "Glow: Suspend Preview Window"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "glow.togglePreview",
+        "key": "alt+r",
+        "when": "editorTextFocus && (editorLangId == slang || resourceExtname == .slang || resourceExtname == .slangh)"
+      },
+      {
+        "command": "glow.fullscreenWindow",
+        "key": "alt+f",
+        "when": "editorTextFocus && (editorLangId == slang || resourceExtname == .slang || resourceExtname == .slangh)"
+      },
+      {
+        "command": "glow.hideOrShowWindow",
+        "key": "alt+v",
+        "when": "editorTextFocus && (editorLangId == slang || resourceExtname == .slang || resourceExtname == .slangh)"
+      },
+      {
+        "command": "glow.suspendWindow",
+        "key": "alt+c",
+        "when": "editorTextFocus && (editorLangId == slang || resourceExtname == .slang || resourceExtname == .slangh)"
       }
     ],
     "configuration": {
@@ -48,7 +84,7 @@
     "typescript": "^5"
   },
   "scripts": {
-    "build": "bun build ./src/extension.ts --outdir ./out --external=* --sourcemap=linked",
-    "watch": "bun build ./src/extension.ts --outdir ./out --external=* --sourcemap=inline --watch"
+    "build": "bun build ./src/extension.ts --outdir ./out --external=vscode --external=node:* --sourcemap=linked",
+    "watch": "bun build ./src/extension.ts --outdir ./out --external=vscode --external=node:* --sourcemap=inline --watch"
   }
 }

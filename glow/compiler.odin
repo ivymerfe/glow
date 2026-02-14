@@ -1,12 +1,8 @@
 package glow
 
-import "core:time"
-import "core:log"
 import "core:strings"
 import "core:sync"
 import "core:thread"
-
-import slang "odin_slang"
 
 CompilerWorker :: struct {
 	thread:  ^thread.Thread,
@@ -56,30 +52,25 @@ compiler_worker_submit :: proc(w: ^CompilerWorker, info: ProgramInfo) {
 
 compiler_worker_proc :: proc(raw: rawptr) {
 	w := cast(^CompilerWorker)raw
-
 	for {
 		sync.auto_reset_event_wait(&w.evt)
 		if sync.atomic_load(&w.stop) {
 			break
 		}
-        
 		info: ProgramInfo
 		has_work := false
-        
+
 		sync.lock(&w.mtx)
 		if w.pending {
-            info = w.info
+			info = w.info
 			w.pending = false
 			has_work = true
 		}
 		sync.unlock(&w.mtx)
-        
-		if !has_work {
-            continue
-		}
-        log.infof("Compiling shader: %s", info.path)
-        time_start := time.now()
 
+		if !has_work {
+			continue
+		}
 		path_c := strings.clone_to_cstring(info.path)
 		source_c := strings.clone_to_cstring(info.source)
 		defer delete_cstring(path_c)
@@ -89,10 +80,6 @@ compiler_worker_proc :: proc(raw: rawptr) {
 		if !success {
 			continue
 		}
-
-        elapsed := time.duration_milliseconds(time.diff(time_start, time.now()))
-        log.infof("Compilation finished in %.2f milliseconds", elapsed)
-
 		sync.lock(&w.glow.program_mtx)
 		w.glow.program = program
 		sync.unlock(&w.glow.program_mtx)
@@ -100,3 +87,4 @@ compiler_worker_proc :: proc(raw: rawptr) {
 		sync.atomic_store(&w.glow.program_should_reload, true)
 	}
 }
+

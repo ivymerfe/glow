@@ -2,9 +2,9 @@ package glow
 
 import "base:runtime"
 import "core:log"
+import "core:os"
 import "core:time"
 
-import "core:os"
 import "core:sync"
 import "core:thread"
 
@@ -32,10 +32,10 @@ app_init :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 	sdl3.SetHint(sdl3.HINT_APP_ID, "glow")
 	sdl_res := sdl3.Init(sdl3.INIT_VIDEO)
 	if !sdl_res {
-		log.panic("Failed to initialize SDL3: %s", sdl3.GetError())
+		log.panic("SDL3 init failed: %s", sdl3.GetError())
 	}
 	sdl_init_time := time.duration_milliseconds(time.diff(launch_time, time.now()))
-	log.infof("SDL3 initialized in %.2f ms", sdl_init_time)
+	log.infof("SDL3 init -> %.2f ms", sdl_init_time)
 
 	vk_init_start := time.now()
 
@@ -44,7 +44,7 @@ app_init :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 	slang_init_start := time.now()
 	slang_check(slang.createGlobalSession(slang.API_VERSION, &g_ctx.slang))
 	slang_init_time := time.duration_milliseconds(time.diff(slang_init_start, time.now()))
-	log.infof("Slang initialized in %.2f ms", slang_init_time)
+	log.infof("Slang init -> %.2f ms", slang_init_time)
 
 	g_render_thread = thread.create_and_start(render_proc, context)
 
@@ -59,7 +59,6 @@ create_app_window :: proc(window_id: u32) {
 	if ok {
 		return
 	}
-
 	win := new(GlowWindow)
 
 	create_window(window_id, win)
@@ -94,6 +93,9 @@ destroy_app_window :: proc(window_id: u32) {
 	delete_key(&g_windowIdMap, win.sdl_id)
 	delete_key(&g_windows, window_id)
 	free(win)
+
+	msg_window_destroyed(window_id)
+	send_messages()
 }
 
 command_handler :: proc(cmd_union: GlowCommand) {
@@ -112,15 +114,20 @@ command_handler :: proc(cmd_union: GlowCommand) {
 			}
 			sync.atomic_store(&win.suspended, !cmd.visible)
 		}
-	case CmdWindowFullscreen:
+	case CmdWindowToggleFullscreen:
 		win := g_windows[cmd.window_id]
 		if win != nil {
-			sdl3.SetWindowFullscreen(win.h, cmd.fullscreen)
+			flags := sdl3.GetWindowFlags(win.h)
+			if .FULLSCREEN in flags {
+				sdl3.SetWindowFullscreen(win.h, false)
+			} else {
+				sdl3.SetWindowFullscreen(win.h, true)
+			}
 		}
-	case CmdWindowSuspend:
+	case CmdWindowToggleSuspend:
 		win := g_windows[cmd.window_id]
 		if win != nil {
-			sync.atomic_store(&win.suspended, cmd.suspend)
+			window_toggle_suspended(win)
 		}
 	case CmdWindowProgram:
 		win := g_windows[cmd.window_id]
@@ -154,16 +161,18 @@ app_event :: proc "c" (userdata: rawptr, event: ^sdl3.Event) -> sdl3.AppResult {
 		if win == nil {
 			break
 		}
-		if event.key.key == sdl3.K_Q {
+		switch (event.key.key) {
+		case sdl3.K_Q:
 			destroy_app_window(window_id)
-		}
-		if event.key.key == sdl3.K_F {
+		case sdl3.K_F:
 			flags := sdl3.GetWindowFlags(win.h)
 			if .FULLSCREEN in flags {
 				sdl3.SetWindowFullscreen(win.h, false)
 			} else {
 				sdl3.SetWindowFullscreen(win.h, true)
 			}
+		case sdl3.K_S:
+			window_toggle_suspended(win)
 		}
 	case .WINDOW_PIXEL_SIZE_CHANGED:
 		window_id := g_windowIdMap[event.window.windowID]
@@ -241,13 +250,13 @@ app_quit :: proc "c" (appstate: rawptr, result: sdl3.AppResult) {
 	g_ctx.slang->release()
 
 	sdl3.Quit()
-	log.info("Goodbye")
 }
 
 main :: proc() {
-	context.logger = log.create_console_logger()
+	context.logger = log.create_file_logger(os.stderr, log.Level.Info)
 	g_ctx.app = context
 
 	argv := cstring("")
 	sdl3.EnterAppMainCallbacks(0, &argv, app_init, app_iter, app_event, app_quit)
 }
+
