@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
+import type { GlowClientOptions } from "./client";
 import { GlowClient } from "./client";
 
 function isShaderDocument(doc: vscode.TextDocument): boolean {
@@ -65,8 +66,7 @@ export function activate(context: vscode.ExtensionContext) {
   const cfg = vscode.workspace.getConfiguration("glow");
   const exe = cfg.get<string>("executablePath", "glow");
   const args = cfg.get<string[]>("args", []);
-
-  glow.start({
+  const options: GlowClientOptions = {
     executablePath: exe,
     args,
     onError: (message) => {
@@ -81,7 +81,10 @@ export function activate(context: vscode.ExtensionContext) {
     onWindowClosed: (_windowId, key) => {
       if (key) cancelPendingUpdate(key);
     },
-  });
+  };
+
+  glow.setOptions(options);
+  glow.start();
 
   context.subscriptions.push({
     dispose: () => {

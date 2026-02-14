@@ -26,7 +26,7 @@ create_window :: proc(window_id: u32, win: ^GlowWindow) {
 		"glow",
 		0,
 		0,
-		sdl3.WINDOW_VULKAN | sdl3.WINDOW_RESIZABLE | sdl3.WINDOW_BORDERLESS,
+		sdl3.WINDOW_VULKAN | sdl3.WINDOW_RESIZABLE | sdl3.WINDOW_HIGH_PIXEL_DENSITY,
 	)
 	if win.h == nil {
 		log.panic("Failed to create SDL3 window: %s", sdl3.GetError())

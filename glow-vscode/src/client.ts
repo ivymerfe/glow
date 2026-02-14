@@ -57,10 +57,13 @@ export class GlowClient {
   private options: GlowClientOptions | undefined;
   private stdoutBuffer: Buffer = Buffer.alloc(0);
 
-  start(options: GlowClientOptions): boolean {
+  setOptions(options: GlowClientOptions) {
     this.options = options;
-    const exe = options.executablePath;
-    const args = options.args ?? [];
+  }
+
+  start(): boolean {
+    const exe = this.options.executablePath;
+    const args = this.options.args ?? [];
 
     try {
       this.proc = spawn(exe, args, {
@@ -68,7 +71,7 @@ export class GlowClient {
       });
     } catch (e) {
       this.proc = undefined;
-      options.onError?.(
+      this.options.onError?.(
         `Glow: failed to start '${exe}'. Check executablePath.`,
       );
       return false;
@@ -90,6 +93,10 @@ export class GlowClient {
       this.stdoutBuffer = Buffer.alloc(0);
       if (code !== null) {
         opts?.onWarning?.(`Glow: subprocess exited with code ${code}.`);
+        if (code === 0) {
+          opts?.onWarning?.(`Glow: restarting in 1s`);
+          setTimeout(() => this.start(), 1000);          
+        }
         if (code === 127) {
           opts?.onError?.("Glow: check slang shared libraries");
         }

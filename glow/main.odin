@@ -46,7 +46,7 @@ app_init :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.Ap
 	slang_init_time := time.duration_milliseconds(time.diff(slang_init_start, time.now()))
 	log.infof("Slang init -> %.2f ms", slang_init_time)
 
-	g_render_thread = thread.create_and_start(render_proc, context)
+	// g_render_thread = thread.create_and_start(render_proc, context)
 
 	return .CONTINUE
 }
@@ -141,11 +141,30 @@ command_handler :: proc(cmd_union: GlowCommand) {
 	}
 }
 
+push: PushConstants
+
 app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
 	context = g_ctx.app
 	poll_commands(command_handler)
+	wait_for_some_window()
 
-	time.sleep(time.Millisecond * 1)
+	rendered := false
+	for _, win in g_windows {
+		if sync.atomic_load(&win.suspended) {
+			continue
+		}
+		push.time = f32(time.duration_seconds(time.stopwatch_duration(win.timer)))
+		push.aspect_ratio = f32(win.width) / f32(win.height)
+		render_info := RenderInfo {
+			width     = u32(min(TARGET_WIDTH, win.width)),
+			height    = u32(min(TARGET_HEIGHT, win.height)),
+			constants = push,
+		}
+		rendered |= render(&win.ren, &win.glow, &render_info)
+	}
+	if !rendered {
+		time.sleep(time.Millisecond * 1)
+	}
 	return .CONTINUE
 }
 
@@ -233,8 +252,8 @@ render_proc :: proc() {
 app_quit :: proc "c" (appstate: rawptr, result: sdl3.AppResult) {
 	context = g_ctx.app
 
-	sync.atomic_store(&g_should_exit, true)
-	thread.destroy(g_render_thread)
+	// sync.atomic_store(&g_should_exit, true)
+	// thread.destroy(g_render_thread)
 
 	if g_ctx.vkc.device != {} {
 		vk.DeviceWaitIdle(g_ctx.vkc.device)
