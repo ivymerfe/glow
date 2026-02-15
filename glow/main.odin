@@ -1,69 +1,66 @@
 package glow
 
+import "core:os"
 import "base:runtime"
 import "core:log"
-import "core:os"
 import "core:time"
 
 import "core:sync"
 import "core:thread"
 
+import "gwin"
+import xkb "gwin/xkbcommon"
 import slang "odin_slang"
-import "vendor:sdl3"
 import vk "vendor:vulkan"
 
+g_wayland: gwin.WaylandContext
 g_windows: map[u32]^GlowWindow
-g_windowIdMap: map[sdl3.WindowID]u32
 g_windowFences: [dynamic]vk.Fence
 
 g_window_mtx: sync.Mutex
 g_should_exit: bool
-g_render_thread: ^thread.Thread
 
-launch_time: time.Time
+render_thread: ^thread.Thread
 
-app_init :: proc "c" (appstate: ^rawptr, argc: i32, argv: [^]cstring) -> sdl3.AppResult {
-	context = g_ctx.app
+main :: proc() {
+	context.logger = log.create_file_logger(os.stderr)
 
 	init_input()
 
-	launch_time = time.now()
-
-	sdl3.SetHint(sdl3.HINT_APP_ID, "glow")
-	sdl_res := sdl3.Init(sdl3.INIT_VIDEO)
-	if !sdl_res {
-		log.panic("SDL3 init failed: %s", sdl3.GetError())
+	launch_time := time.now()
+	if !gwin.create_wayland_context(&g_wayland, event_handler) {
+		log.panic("Failed to initialize window system")
 	}
-	sdl_init_time := time.duration_milliseconds(time.diff(launch_time, time.now()))
-	log.infof("SDL3 init -> %.2f ms", sdl_init_time)
-
-	vk_init_start := time.now()
+	wl_init_end := time.now()
+	wl_init_time := time.duration_milliseconds(time.diff(launch_time, wl_init_end))
+	log.infof("Wl init -> %.2f ms", wl_init_time)
 
 	g_ctx.instance = create_vk_instance()
+	vk_init_end := time.now()
+	vk_init_time := time.duration_milliseconds(time.diff(wl_init_end, vk_init_end))
+	log.infof("Vk init -> %.2f ms", vk_init_time)
 
-	slang_init_start := time.now()
 	slang_check(slang.createGlobalSession(slang.API_VERSION, &g_ctx.slang))
-	slang_init_time := time.duration_milliseconds(time.diff(slang_init_start, time.now()))
+	slang_init_time := time.duration_milliseconds(time.diff(vk_init_end, time.now()))
 	log.infof("Slang init -> %.2f ms", slang_init_time)
 
-	// g_render_thread = thread.create_and_start(render_proc, context)
-
-	return .CONTINUE
+	render_thread = thread.create_and_start(render_proc, context)
+	for gwin.dispatch_events(&g_wayland) {
+		poll_commands(command_handler)
+		time.sleep(time.Millisecond * 1)
+	}
+	shutdown()
 }
 
 create_app_window :: proc(window_id: u32) {
-	sync.lock(&g_window_mtx)
-	defer sync.unlock(&g_window_mtx)
-
 	_, ok := g_windows[window_id]
 	if ok {
 		return
 	}
 	win := new(GlowWindow)
 
-	create_window(window_id, win)
+	create_window(&g_wayland, window_id, win)
 	g_windows[window_id] = win
-	g_windowIdMap[win.sdl_id] = window_id
 
 	append(&g_windowFences, win.ren.render_fence)
 }
@@ -90,12 +87,35 @@ destroy_app_window :: proc(window_id: u32) {
 	}
 
 	destroy_window(win)
-	delete_key(&g_windowIdMap, win.sdl_id)
 	delete_key(&g_windows, window_id)
 	free(win)
 
 	msg_window_destroyed(window_id)
 	send_messages()
+}
+
+event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent) {
+	#partial switch event in event_union {
+	case gwin.EventKeyDown:
+		switch event.keysym {
+		case xkb.XKB_KEY_q:
+			destroy_app_window(native.id)
+		case xkb.XKB_KEY_f:
+			gwin.set_window_fullscreen(native, !native.fullscreen)
+		case xkb.XKB_KEY_s:
+			win := g_windows[native.id]
+			if win != nil {
+				window_toggle_suspended(win)
+			}
+		case xkb.XKB_KEY_v:
+			win := g_windows[native.id]
+			if win != nil {
+				win.suspended = native.visible
+				gwin.set_window_visible(native, !native.visible)
+			}
+		}
+
+	}
 }
 
 command_handler :: proc(cmd_union: GlowCommand) {
@@ -107,22 +127,15 @@ command_handler :: proc(cmd_union: GlowCommand) {
 	case CmdWindowVisible:
 		win := g_windows[cmd.window_id]
 		if win != nil {
-			if cmd.visible {
-				sdl3.ShowWindow(win.h)
-			} else {
-				sdl3.HideWindow(win.h)
-			}
+			sync.lock(&g_window_mtx)
+			gwin.set_window_visible(win.native, cmd.visible)
+			sync.unlock(&g_window_mtx)
 			sync.atomic_store(&win.suspended, !cmd.visible)
 		}
 	case CmdWindowToggleFullscreen:
 		win := g_windows[cmd.window_id]
 		if win != nil {
-			flags := sdl3.GetWindowFlags(win.h)
-			if .FULLSCREEN in flags {
-				sdl3.SetWindowFullscreen(win.h, false)
-			} else {
-				sdl3.SetWindowFullscreen(win.h, true)
-			}
+			gwin.set_window_fullscreen(win.native, !win.native.fullscreen)
 		}
 	case CmdWindowToggleSuspend:
 		win := g_windows[cmd.window_id]
@@ -141,102 +154,40 @@ command_handler :: proc(cmd_union: GlowCommand) {
 	}
 }
 
-push: PushConstants
-
-app_iter :: proc "c" (appstate: rawptr) -> sdl3.AppResult {
-	context = g_ctx.app
-	poll_commands(command_handler)
-	wait_for_some_window()
-
-	rendered := false
-	for _, win in g_windows {
-		if sync.atomic_load(&win.suspended) {
-			continue
-		}
-		push.time = f32(time.duration_seconds(time.stopwatch_duration(win.timer)))
-		push.aspect_ratio = f32(win.width) / f32(win.height)
-		render_info := RenderInfo {
-			width     = u32(min(TARGET_WIDTH, win.width)),
-			height    = u32(min(TARGET_HEIGHT, win.height)),
-			constants = push,
-		}
-		rendered |= render(&win.ren, &win.glow, &render_info)
+wait_for_window :: proc() {
+	if len(g_ctx.fences) > 0 {
+		vk_try(
+			vk.WaitForFences(
+				g_ctx.vkc.device,
+				u32(len(g_ctx.fences)),
+				raw_data(g_ctx.fences),
+				false,
+				max(u64),
+			),
+		)
 	}
-	if !rendered {
-		time.sleep(time.Millisecond * 1)
-	}
-	return .CONTINUE
-}
-
-app_event :: proc "c" (userdata: rawptr, event: ^sdl3.Event) -> sdl3.AppResult {
-	context = g_ctx.app
-
-	#partial switch event.type {
-	case .QUIT:
-		return .SUCCESS
-	case .KEY_DOWN:
-		window_id := g_windowIdMap[event.window.windowID]
-		win := g_windows[window_id]
-		if win == nil {
-			break
-		}
-		switch (event.key.key) {
-		case sdl3.K_Q:
-			destroy_app_window(window_id)
-		case sdl3.K_F:
-			flags := sdl3.GetWindowFlags(win.h)
-			if .FULLSCREEN in flags {
-				sdl3.SetWindowFullscreen(win.h, false)
-			} else {
-				sdl3.SetWindowFullscreen(win.h, true)
-			}
-		case sdl3.K_S:
-			window_toggle_suspended(win)
-		}
-	case .WINDOW_PIXEL_SIZE_CHANGED:
-		window_id := g_windowIdMap[event.window.windowID]
-		win := g_windows[window_id]
-		if win != nil {
-			win.width = int(event.window.data1)
-			win.height = int(event.window.data2)
-		}
-	}
-	return .CONTINUE
-}
-
-wait_for_some_window :: proc() {
-	if len(g_ctx.fences) == 0 {
-		return
-	}
-	vk_try(
-		vk.WaitForFences(
-			g_ctx.vkc.device,
-			u32(len(g_ctx.fences)),
-			raw_data(g_ctx.fences),
-			false,
-			max(u64),
-		),
-	)
 }
 
 render_proc :: proc() {
 	push: PushConstants
-
 	for !sync.atomic_load(&g_should_exit) {
 		sync.lock(&g_window_mtx)
-
-		wait_for_some_window()
-
+		wait_for_window()
 		rendered := false
 		for _, win in g_windows {
 			if sync.atomic_load(&win.suspended) {
 				continue
 			}
+			if !win.native.configured {
+				continue
+			}
+			width := f32(win.native.width) * win.native.scale
+			height := f32(win.native.height) * win.native.scale
 			push.time = f32(time.duration_seconds(time.stopwatch_duration(win.timer)))
-			push.aspect_ratio = f32(win.width) / f32(win.height)
+			push.aspect_ratio = f32(width) / f32(height)
 			render_info := RenderInfo {
-				width     = u32(min(TARGET_WIDTH, win.width)),
-				height    = u32(min(TARGET_HEIGHT, win.height)),
+				width     = u32(min(TARGET_WIDTH, width)),
+				height    = u32(min(TARGET_HEIGHT, height)),
 				constants = push,
 			}
 			rendered |= render(&win.ren, &win.glow, &render_info)
@@ -249,33 +200,29 @@ render_proc :: proc() {
 	}
 }
 
-app_quit :: proc "c" (appstate: rawptr, result: sdl3.AppResult) {
-	context = g_ctx.app
-
-	// sync.atomic_store(&g_should_exit, true)
-	// thread.destroy(g_render_thread)
+shutdown :: proc() {
+	sync.atomic_store(&g_should_exit, true)
+	thread.join(render_thread)
 
 	if g_ctx.vkc.device != {} {
 		vk.DeviceWaitIdle(g_ctx.vkc.device)
 
-		for _, win in g_windows {
-			destroy_window(win)
+		for _, glow_win in g_windows {
+			destroy_window(glow_win)
 		}
-
 		destroy_vulkan_context(&g_ctx.vkc)
 	}
-	vk.DestroyInstance(g_ctx.instance, nil)
+	if g_ctx.instance != {} {
+		vk.DestroyInstance(g_ctx.instance, nil)
+	}
+	if g_ctx.slang != nil {
+		g_ctx.slang->release()
+	}
+	gwin.destroy_wayland_context(&g_wayland)
 
-	g_ctx.slang->release()
+	delete(g_windows)
+	delete(g_windowFences)
 
-	sdl3.Quit()
-}
-
-main :: proc() {
-	context.logger = log.create_file_logger(os.stderr, log.Level.Info)
-	g_ctx.app = context
-
-	argv := cstring("")
-	sdl3.EnterAppMainCallbacks(0, &argv, app_init, app_iter, app_event, app_quit)
+	log.info("Goodbye")
 }
 

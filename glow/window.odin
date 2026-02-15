@@ -4,39 +4,33 @@ import "core:log"
 import "core:sync"
 import "core:time"
 
-import "vendor:sdl3"
+import "gwin"
 import vk "vendor:vulkan"
 
 GlowWindow :: struct {
 	id:              u32,
-	sdl_id:          sdl3.WindowID,
-	h:               ^sdl3.Window,
-	width:           int,
-	height:          int,
+	native:          ^gwin.WaylandWindow,
 	ren:             GlowRenderer,
 	glow:            GlowContext,
 	timer:           time.Stopwatch,
 	suspended:       bool,
 	compiler_worker: CompilerWorker,
+	vk_surface:      vk.SurfaceKHR,
 }
 
-create_window :: proc(window_id: u32, win: ^GlowWindow) {
+create_window :: proc(ctx: ^gwin.WaylandContext, window_id: u32, win: ^GlowWindow) {
 	win.id = window_id
-	win.h = sdl3.CreateWindow(
-		"glow",
-		0,
-		0,
-		sdl3.WINDOW_VULKAN | sdl3.WINDOW_RESIZABLE | sdl3.WINDOW_HIGH_PIXEL_DENSITY,
-	)
-	if win.h == nil {
-		log.panic("Failed to create SDL3 window: %s", sdl3.GetError())
+	native, success := gwin.create_window(ctx, window_id, "glow", 640, 360)
+	if !success {
+		log.panic("Failed to create Wayland window")
 	}
-	win.sdl_id = sdl3.GetWindowID(win.h)
+	win.native = native
 
-	surface: vk.SurfaceKHR
-	if !sdl3.Vulkan_CreateSurface(win.h, g_ctx.instance, nil, &surface) {
-		log.panic("Failed to create Vulkan surface from SDL3 window: %s", sdl3.GetError())
+	surface, ok := gwin.create_vulkan_surface(native, g_ctx.instance)
+	if !ok {
+		log.panic("Failed to create Vulkan surface")
 	}
+	win.vk_surface = surface
 	if g_ctx.vkc == {} {
 		g_ctx.vkc = create_vulkan_context(g_ctx.instance, surface)
 	}
@@ -53,17 +47,17 @@ destroy_window :: proc(win: ^GlowWindow) {
 	destroy_glow_context(&win.glow)
 	destroy_renderer(&win.ren)
 
-	sdl3.DestroyWindow(win.h)
+	gwin.destroy_window(win.native)
 }
 
-window_toggle_suspended :: proc(win: ^GlowWindow) {
-	suspended := sync.atomic_load(&win.suspended)
+window_toggle_suspended :: proc(win_ptr: ^GlowWindow) {
+	suspended := sync.atomic_load(&win_ptr.suspended)
 	if suspended {
-		sync.atomic_store(&win.suspended, false)
-		time.stopwatch_start(&win.timer)
+		sync.atomic_store(&win_ptr.suspended, false)
+		time.stopwatch_start(&win_ptr.timer)
 	} else {
-		sync.atomic_store(&win.suspended, true)
-		time.stopwatch_stop(&win.timer)
+		sync.atomic_store(&win_ptr.suspended, true)
+		time.stopwatch_stop(&win_ptr.timer)
 	}
 }
 

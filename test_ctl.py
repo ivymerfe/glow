@@ -168,8 +168,13 @@ def run_controller(glow_bin: str, glow_args: list[str]) -> int:
             _write_all(child.stdin, frame)
         except BrokenPipeError:
             raise RuntimeError("glow.bin stdin closed (process exited?)")
+    
+    send(encode_create(0))
+    path = "glow/shaders/test.slang"
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        src_text = f.read()
+    send(encode_program(0, path, src_text))
 
-    # Read commands from controller stdin and forward encoded frames.
     for raw_line in sys.stdin:
         line = raw_line.strip()
         if not line or line.startswith("#"):
@@ -252,7 +257,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     if glow_args and glow_args[0] == "--":
         glow_args = glow_args[1:]
 
-    # Make it easier to run from workspace root.
     glow_bin = os.path.expanduser(glow_bin)
     return run_controller(glow_bin, glow_args)
 

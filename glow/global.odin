@@ -1,7 +1,6 @@
 package glow
 
 import "base:runtime"
-import "core:log"
 import slang "odin_slang"
 import vk "vendor:vulkan"
 
@@ -19,3 +18,4 @@ GlobalContext :: struct {
 }
 
 g_ctx: GlobalContext
+
