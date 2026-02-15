@@ -1,8 +1,8 @@
 package glow
 
-import "core:os"
 import "base:runtime"
 import "core:log"
+import "core:os"
 import "core:time"
 
 import "core:sync"
@@ -110,8 +110,10 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 		case xkb.XKB_KEY_v:
 			win := g_windows[native.id]
 			if win != nil {
-				win.suspended = native.visible
-				gwin.set_window_visible(native, !native.visible)
+				sync.atomic_store(&win.suspended, true)
+				gwin.set_window_visible(native, false)
+				msg_window_visible(native.id, false)
+				send_messages()
 			}
 		}
 
@@ -127,9 +129,7 @@ command_handler :: proc(cmd_union: GlowCommand) {
 	case CmdWindowVisible:
 		win := g_windows[cmd.window_id]
 		if win != nil {
-			sync.lock(&g_window_mtx)
 			gwin.set_window_visible(win.native, cmd.visible)
-			sync.unlock(&g_window_mtx)
 			sync.atomic_store(&win.suspended, !cmd.visible)
 		}
 	case CmdWindowToggleFullscreen:

@@ -11,6 +11,7 @@ const enum GlowCommandType {
 
 const enum GlowMessageType {
   WINDOW_CLOSED = 0,
+  WINDOW_VISIBLE = 1,
 }
 
 function u32le(value: number): Buffer {
@@ -95,7 +96,7 @@ export class GlowClient {
         opts?.onWarning?.(`Glow: subprocess exited with code ${code}.`);
         if (code === 0) {
           opts?.onWarning?.(`Glow: restarting in 1s`);
-          setTimeout(() => this.start(), 1000);          
+          setTimeout(() => this.start(), 1000);
         }
         if (code === 127) {
           opts?.onError?.("Glow: check slang shared libraries");
@@ -159,22 +160,31 @@ export class GlowClient {
       case GlowMessageType.WINDOW_CLOSED: {
         if (payload.byteLength < 5) return;
         const windowId = payload.readUInt32LE(1);
-        this.handleWindowClosed(windowId);
+        const key = this.windowIdToKey.get(windowId);
+        if (key) {
+          this.windowIdToKey.delete(windowId);
+          this.windows.delete(key);
+        }
+        this.options?.onWindowClosed?.(windowId, key);
+        break;
+      }
+      case GlowMessageType.WINDOW_VISIBLE: {
+        if (payload.byteLength < 6) return;
+        const windowId = payload.readUInt32LE(1);
+        const visible = !!payload.readUInt8(5);
+        const key = this.windowIdToKey.get(windowId);
+        if (key) {
+          const win = this.windows.get(key);
+          if (win) {
+            win.visible = visible;
+          }
+        }
         break;
       }
       default:
         this.options?.onWarning?.(`Glow: unknown message type ${type}.`);
         break;
     }
-  }
-
-  private handleWindowClosed(windowId: number) {
-    const key = this.windowIdToKey.get(windowId);
-    if (key) {
-      this.windowIdToKey.delete(windowId);
-      this.windows.delete(key);
-    }
-    this.options?.onWindowClosed?.(windowId, key);
   }
 
   private cmdWindowCreate(windowId: number) {

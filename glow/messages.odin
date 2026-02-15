@@ -4,12 +4,20 @@ import "core:os"
 
 MessageType :: enum {
 	WINDOW_CLOSED,
+	WINDOW_VISIBLE,
 }
 
 msg_window_destroyed :: proc(window_id: u32) {
 	msg_data_u32(5) // 5 bytes
 	msg_data_u8(u8(MessageType.WINDOW_CLOSED))
 	msg_data_u32(window_id)
+}
+
+msg_window_visible :: proc(window_id: u32, visible: bool) {
+	msg_data_u32(6) // 6 bytes
+	msg_data_u8(u8(MessageType.WINDOW_VISIBLE))
+	msg_data_u32(window_id)
+	msg_data_u8(u8(visible))
 }
 
 g_out: [dynamic]u8
