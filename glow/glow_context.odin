@@ -1,8 +1,5 @@
 package glow
 
-import "core:log"
-import "core:sync"
-
 import vk "vendor:vulkan"
 
 PushConstants :: struct {
@@ -19,27 +16,11 @@ PushConstants :: struct {
 	frame_index:      u32,
 }
 
-GlowImage :: struct {
-	extent: vk.Extent2D,
-	format: vk.Format,
-	image:  vk.Image,
-	view:   vk.ImageView,
-	mem:    vk.DeviceMemory,
-	layout: vk.ImageLayout,
-}
-
 GlowContext :: struct {
-	using vk_context:      VulkanContext,
-	target:                GlowImage,
-	descriptor_pool:       vk.DescriptorPool,
-	vs_module:             vk.ShaderModule,
-	ps_module:             vk.ShaderModule,
-	pipeline:              vk.Pipeline,
-	layout:                vk.PipelineLayout,
-	program:               GlowProgram,
-	program_loaded:        bool,
-	program_should_reload: bool,
-	program_mtx:           sync.Mutex,
+	using vk_context: VulkanContext,
+	res:              ^ResourceManager,
+	pipeline:         vk.Pipeline,
+	layout:           vk.PipelineLayout,
 }
 
 RenderInfo :: struct {
@@ -48,92 +29,32 @@ RenderInfo :: struct {
 	constants: PushConstants,
 }
 
-TARGET_FORMAT: vk.Format = .R32G32B32A32_SFLOAT
+create_context :: proc(ctx: ^GlowContext, res: ^ResourceManager, program: ^GlowProgram) {
+	ctx.vk_context = res.vk_context
+	ctx.res = res
 
-MAX_DESCRIPTOR_SETS :: 128
-MAX_STORAGE_IMAGES :: 256
-
-VS_FULLSCREEN_SPV: []u8 = #load("shaders/vs_fullscreen.spv")
-
-create_glow_context :: proc(
-	vkc: VulkanContext,
-	target_width: u32,
-	target_height: u32,
-) -> GlowContext {
-	ctx: GlowContext
-	ctx.vk_context = vkc
-
-	pool_size := vk.DescriptorPoolSize {
-		type            = .STORAGE_IMAGE,
-		descriptorCount = MAX_STORAGE_IMAGES,
-	}
-	pool_info := vk.DescriptorPoolCreateInfo {
-		sType         = .DESCRIPTOR_POOL_CREATE_INFO,
-		flags         = {.FREE_DESCRIPTOR_SET},
-		maxSets       = MAX_DESCRIPTOR_SETS,
-		poolSizeCount = 1,
-		pPoolSizes    = &pool_size,
-	}
-	vk_try(vk.CreateDescriptorPool(ctx.device, &pool_info, nil, &ctx.descriptor_pool))
-
-	ctx.target = create_image(&ctx, target_width, target_height)
-
-	vs_loaded: bool
-	ctx.vs_module, vs_loaded = load_shader_from_memory(&ctx, VS_FULLSCREEN_SPV)
-	if !vs_loaded {
-		log.panic("Failed to load vertex shader")
-	}
-
-	return ctx
-}
-
-destroy_glow_context :: proc(ctx: ^GlowContext) {
-	device := ctx.vk_context.device
-
-	vk.DestroyPipelineLayout(device, ctx.layout, nil)
-	vk.DestroyPipeline(device, ctx.pipeline, nil)
-
-	destroy_image(ctx, &ctx.target)
-
-	if ctx.vs_module != {} {
-		vk.DestroyShaderModule(device, ctx.vs_module, nil)
-	}
-	if ctx.ps_module != {} {
-		vk.DestroyShaderModule(device, ctx.ps_module, nil)
-	}
-	vk.DestroyDescriptorPool(device, ctx.descriptor_pool, nil)
-}
-
-load_program :: proc(ctx: ^GlowContext, program: GlowProgram) {
-	if ctx.ps_module != {} {
-		vk.DestroyShaderModule(ctx.device, ctx.ps_module, nil)
-	}
+	module: vk.ShaderModule
 	create_info := vk.ShaderModuleCreateInfo {
 		sType    = .SHADER_MODULE_CREATE_INFO,
 		codeSize = int(program.code->getBufferSize()),
 		pCode    = auto_cast program.code->getBufferPointer(),
 	}
-	vk_try(vk.CreateShaderModule(ctx.device, &create_info, nil, &ctx.ps_module))
-
-	if ctx.pipeline != {} {
-		vk.DestroyPipeline(ctx.device, ctx.pipeline, nil)
-		vk.DestroyPipelineLayout(ctx.device, ctx.layout, nil)
-	}
-	create_pipeline(ctx)
-	free_program(&ctx.program)
-	ctx.program_loaded = true
+	vk_try(vk.CreateShaderModule(ctx.device, &create_info, nil, &module))
+	create_pipeline(ctx, module)
+	vk.DestroyShaderModule(ctx.device, module, nil)
 }
 
-maybe_load_program :: proc(ctx: ^GlowContext) {
-	if sync.atomic_exchange(&ctx.program_should_reload, false) {
-		sync.lock(&ctx.program_mtx)
-		load_program(ctx, ctx.program)
-		sync.unlock(&ctx.program_mtx)
+destroy_context :: proc(ctx: ^GlowContext) {
+	if ctx.pipeline != {} {
+		vk.DestroyPipeline(ctx.device, ctx.pipeline, nil)
+	}
+	if ctx.layout != {} {
+		vk.DestroyPipelineLayout(ctx.device, ctx.layout, nil)
 	}
 }
 
 draw_context :: proc(ctx: ^GlowContext, cmd: vk.CommandBuffer, render_info: ^RenderInfo) {
-	target := &ctx.target
+	target := &ctx.res.target
 
 	src_stage := vk.PipelineStageFlags2.TOP_OF_PIPE
 	src_access := vk.AccessFlags2{}
@@ -219,45 +140,8 @@ draw_context :: proc(ctx: ^GlowContext, cmd: vk.CommandBuffer, render_info: ^Ren
 	target.layout = .TRANSFER_SRC_OPTIMAL
 }
 
-
-create_image :: proc(vk_context: ^VulkanContext, width: u32, height: u32) -> GlowImage {
-	extent := vk.Extent2D {
-		width  = width,
-		height = height,
-	}
-	img, mem := create_2d_image(
-		vk_context,
-		TARGET_FORMAT,
-		extent.width,
-		extent.height,
-		{.COLOR_ATTACHMENT, .TRANSFER_SRC},
-		.UNDEFINED,
-	)
-	view := create_image_view_2d(vk_context, img, TARGET_FORMAT, {.COLOR})
-	return GlowImage {
-		extent = extent,
-		format = TARGET_FORMAT,
-		image = img,
-		view = view,
-		mem = mem,
-		layout = .UNDEFINED,
-	}
-}
-
-destroy_image :: proc(ctx: ^VulkanContext, image: ^GlowImage) {
-	if image.view != {} {
-		vk.DestroyImageView(ctx.device, image.view, nil)
-	}
-	if image.image != {} {
-		vk.DestroyImage(ctx.device, image.image, nil)
-	}
-	if image.mem != {} {
-		vk.FreeMemory(ctx.device, image.mem, nil)
-	}
-}
-
 @(private = "file")
-create_pipeline :: proc(ctx: ^GlowContext) {
+create_pipeline :: proc(ctx: ^GlowContext, ps_module: vk.ShaderModule) {
 	push_constant_ranges := []vk.PushConstantRange {
 		{stageFlags = {.VERTEX, .FRAGMENT}, offset = 0, size = size_of(PushConstants)},
 	}
@@ -317,13 +201,13 @@ create_pipeline :: proc(ctx: ^GlowContext) {
 	vertex_shader_info := vk.PipelineShaderStageCreateInfo {
 		sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 		stage  = {.VERTEX},
-		module = ctx.vs_module,
+		module = ctx.res.vs_fullscreen,
 		pName  = "main",
 	}
 	pixel_shader_info := vk.PipelineShaderStageCreateInfo {
 		sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 		stage  = {.FRAGMENT},
-		module = ctx.ps_module,
+		module = ps_module,
 		pName  = "main",
 	}
 	shader_stages := []vk.PipelineShaderStageCreateInfo{vertex_shader_info, pixel_shader_info}

@@ -14,8 +14,7 @@ GlobalContext :: struct {
 	vkc:      VulkanContext,
 	instance: vk.Instance,
 	slang:    ^slang.IGlobalSession,
-	fences:   [dynamic]vk.Fence,
+	res:      ResourceManager,
 }
 
 g_ctx: GlobalContext
-

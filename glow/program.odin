@@ -10,12 +10,6 @@ GlowProgram :: struct {
 	code: ^slang.IBlob,
 }
 
-ProgramInfo :: struct {
-	version: u32,
-	path:    string,
-	source:  string,
-}
-
 slang_check :: proc(result: slang.Result, loc := #caller_location) {
 	if result != slang.OK {
 		log.panicf("Slang error: %d", int(result), loc)
@@ -54,7 +48,7 @@ create_slang_session :: proc() -> (session: ^slang.ISession) {
 	return
 }
 
-compile_program :: proc(path: cstring, source: cstring) -> (program: GlowProgram, success: bool) {
+compile_program :: proc(ctx: ^GlowContext, path: cstring, source: cstring) -> (success: bool) {
 	time_start := time.now()
 	defer {
 		elapsed := time.duration_milliseconds(time.diff(time_start, time.now()))
@@ -70,6 +64,7 @@ compile_program :: proc(path: cstring, source: cstring) -> (program: GlowProgram
 	if slang_module == nil {
 		return
 	}
+
 	fragment_entry: ^slang.IEntryPoint
 	slang_module->findEntryPointByName("main", &fragment_entry)
 	if fragment_entry == nil {
@@ -91,27 +86,28 @@ compile_program :: proc(path: cstring, source: cstring) -> (program: GlowProgram
 	if composed_program == nil {
 		return
 	}
+	defer composed_program->release()
+
 	linked_program: ^slang.IComponentType
 	slang_check(composed_program->link(&linked_program, &diagnostics))
 	diagnostics_check(path, diagnostics)
 	if linked_program == nil {
 		return
 	}
+	defer linked_program->release()
+
 	target_code: ^slang.IBlob
 	slang_check(linked_program->getTargetCode(0, &target_code, &diagnostics))
 	diagnostics_check(path, diagnostics)
 	if target_code == nil {
 		return
 	}
+	defer target_code->release()
+
+	program: GlowProgram
 	program.code = target_code
+	create_context(ctx, &g_ctx.res, &program)
+
 	success = true
 	return
 }
-
-free_program :: proc(program: ^GlowProgram) {
-	if program.code != nil {
-		program.code->release()
-		program.code = nil
-	}
-}
-

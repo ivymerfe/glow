@@ -4,31 +4,26 @@ import "core:strings"
 import "core:sync"
 import "core:thread"
 
-CompilerWorker :: struct {
+CompileRequest :: struct {
+	ren:    ^GlowRenderer,
+	path:   string,
+	source: string,
+}
+
+CompilerThread :: struct {
 	thread:  ^thread.Thread,
-	mtx:     sync.Mutex,
 	evt:     sync.Auto_Reset_Event,
-
-	// Wiring (owned elsewhere; must outlive the worker thread)
-	glow:    ^GlowContext,
-
-	// Request state (protected by mtx)
-	pending: bool,
-	info:    ProgramInfo,
-
-	// Shutdown (atomic for cross-thread visibility)
+	mtx:     sync.Mutex,
+	request: CompileRequest,
 	stop:    bool,
 }
 
-compiler_worker_start :: proc(w: ^CompilerWorker, glow: ^GlowContext) {
-	w.glow = glow
+compiler_start :: proc(w: ^CompilerThread) {
 	w.stop = false
-	w.pending = false
-
-	w.thread = thread.create_and_start_with_data(w, compiler_worker_proc, context)
+	w.thread = thread.create_and_start_with_data(w, compiler_proc, context)
 }
 
-compiler_worker_stop :: proc(w: ^CompilerWorker) {
+compiler_stop :: proc(w: ^CompilerThread) {
 	if w.thread == nil {
 		return
 	}
@@ -41,50 +36,37 @@ compiler_worker_stop :: proc(w: ^CompilerWorker) {
 	w.thread = nil
 }
 
-compiler_worker_submit :: proc(w: ^CompilerWorker, info: ProgramInfo) {
+compiler_submit :: proc(w: ^CompilerThread, req: CompileRequest) {
 	sync.lock(&w.mtx)
-	w.info = info
-	w.pending = true
+	w.request = req
 	sync.unlock(&w.mtx)
-
 	sync.auto_reset_event_signal(&w.evt)
 }
 
-compiler_worker_proc :: proc(raw: rawptr) {
-	w := cast(^CompilerWorker)raw
+compiler_proc :: proc(raw: rawptr) {
+	w := cast(^CompilerThread)raw
+	request: CompileRequest
 	for {
 		sync.auto_reset_event_wait(&w.evt)
 		if sync.atomic_load(&w.stop) {
 			break
 		}
-		info: ProgramInfo
-		has_work := false
-
 		sync.lock(&w.mtx)
-		if w.pending {
-			info = w.info
-			w.pending = false
-			has_work = true
-		}
+		request = w.request
 		sync.unlock(&w.mtx)
 
-		if !has_work {
-			continue
-		}
-		path_c := strings.clone_to_cstring(info.path)
-		source_c := strings.clone_to_cstring(info.source)
+		path_c := strings.clone_to_cstring(w.request.path)
+		source_c := strings.clone_to_cstring(w.request.source)
 		defer delete_cstring(path_c)
 		defer delete_cstring(source_c)
 
-		program, success := compile_program(path_c, source_c)
+		ctx: GlowContext
+		success := compile_program(&ctx, path_c, source_c)
 		if !success {
 			continue
 		}
-		sync.lock(&w.glow.program_mtx)
-		w.glow.program = program
-		sync.unlock(&w.glow.program_mtx)
+		swapper_set_next(&request.ren.context_swapper, ctx)
 
-		sync.atomic_store(&w.glow.program_should_reload, true)
+		sync.auto_reset_event_signal(&g_wakeup_renderer)
 	}
 }
-

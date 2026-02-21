@@ -3,6 +3,7 @@ package glow
 import "base:runtime"
 import "core:log"
 import "core:os"
+import "core:sys/linux"
 import "core:time"
 
 import "core:sync"
@@ -15,15 +16,16 @@ import vk "vendor:vulkan"
 
 g_wayland: gwin.WaylandContext
 g_windows: map[u32]^GlowWindow
-g_windowFences: [dynamic]vk.Fence
 
+g_compiler: CompilerThread
+
+g_render_thread: ^thread.Thread
 g_window_mtx: sync.Mutex
 g_should_exit: bool
-
-render_thread: ^thread.Thread
+g_wakeup_renderer: sync.Auto_Reset_Event
 
 main :: proc() {
-	context.logger = log.create_file_logger(os.stderr)
+	context.logger = log.create_file_logger(os.stderr, log.Level.Debug)
 
 	init_input()
 
@@ -44,50 +46,57 @@ main :: proc() {
 	slang_init_time := time.duration_milliseconds(time.diff(vk_init_end, time.now()))
 	log.infof("Slang init -> %.2f ms", slang_init_time)
 
-	render_thread = thread.create_and_start(render_proc, context)
-	for gwin.dispatch_events(&g_wayland) {
-		poll_commands(command_handler)
-		time.sleep(time.Millisecond * 1)
+	compiler_start(&g_compiler)
+	g_render_thread = thread.create_and_start(render_proc, context)
+
+	wayland_fd := gwin.get_display_fd(&g_wayland)
+	fds: [2]linux.Poll_Fd
+	fds[0] = linux.Poll_Fd {
+		fd     = linux.Fd(wayland_fd),
+		events = {.IN},
+	}
+	fds[1] = linux.Poll_Fd {
+		fd     = linux.STDIN_FILENO,
+		events = {.IN},
+	}
+	for {
+		n, err := linux.poll(fds[:], -1)
+		if err != .NONE {
+			log.panic("poll failed")
+		}
+		if fds[0].revents & {.IN} != {} {
+			gwin.dispatch_events(&g_wayland)
+		}
+		if fds[1].revents & {.IN} != {} {
+			poll_commands(command_handler)
+		}
 	}
 	shutdown()
 }
 
-create_app_window :: proc(window_id: u32) {
+app_create_window :: proc(window_id: u32) {
 	_, ok := g_windows[window_id]
 	if ok {
 		return
 	}
 	win := new(GlowWindow)
+	ctx := new(GlowContext)
 
 	create_window(&g_wayland, window_id, win)
+	sync.lock(&g_window_mtx)
 	g_windows[window_id] = win
-
-	append(&g_windowFences, win.ren.render_fence)
+	sync.unlock(&g_window_mtx)
 }
 
-destroy_app_window :: proc(window_id: u32) {
-	sync.lock(&g_window_mtx)
-	defer sync.unlock(&g_window_mtx)
-
+app_destroy_window :: proc(window_id: u32) {
 	win := g_windows[window_id]
 	if win == nil {
 		return
 	}
-
-	window_fence := win.ren.render_fence
-	fence_index := -1
-	for fence, i in g_windowFences {
-		if fence == window_fence {
-			fence_index = i
-			break
-		}
-	}
-	if fence_index != -1 {
-		unordered_remove(&g_windowFences, fence_index)
-	}
-
+	sync.lock(&g_window_mtx)
 	destroy_window(win)
 	delete_key(&g_windows, window_id)
+	sync.unlock(&g_window_mtx)
 	free(win)
 
 	msg_window_destroyed(window_id)
@@ -99,38 +108,44 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 	case gwin.EventKeyDown:
 		switch event.keysym {
 		case xkb.XKB_KEY_q:
-			destroy_app_window(native.id)
+			app_destroy_window(native.id)
 		case xkb.XKB_KEY_f:
 			gwin.set_window_fullscreen(native, !native.fullscreen)
-		case xkb.XKB_KEY_s:
-			win := g_windows[native.id]
-			if win != nil {
-				window_toggle_suspended(win)
-			}
 		case xkb.XKB_KEY_v:
 			win := g_windows[native.id]
 			if win != nil {
-				sync.atomic_store(&win.suspended, true)
+				sync.atomic_store(&win.visible, false)
 				gwin.set_window_visible(native, false)
 				msg_window_visible(native.id, false)
 				send_messages()
 			}
+		case xkb.XKB_KEY_s:
+			win := g_windows[native.id]
+			if win != nil {
+				active := !sync.atomic_load(&win.active)
+				set_window_active(win, active)
+				if active {
+					sync.auto_reset_event_signal(&g_wakeup_renderer)
+				}
+			}
 		}
-
 	}
 }
 
 command_handler :: proc(cmd_union: GlowCommand) {
 	switch cmd in cmd_union {
 	case CmdWindowCreate:
-		create_app_window(cmd.window_id)
+		app_create_window(cmd.window_id)
 	case CmdWindowDestroy:
-		destroy_app_window(cmd.window_id)
+		app_destroy_window(cmd.window_id)
 	case CmdWindowVisible:
 		win := g_windows[cmd.window_id]
 		if win != nil {
 			gwin.set_window_visible(win.native, cmd.visible)
-			sync.atomic_store(&win.suspended, !cmd.visible)
+			sync.atomic_store(&win.visible, cmd.visible)
+			if cmd.visible {
+				sync.auto_reset_event_signal(&g_wakeup_renderer)
+			}
 		}
 	case CmdWindowToggleFullscreen:
 		win := g_windows[cmd.window_id]
@@ -140,76 +155,84 @@ command_handler :: proc(cmd_union: GlowCommand) {
 	case CmdWindowToggleSuspend:
 		win := g_windows[cmd.window_id]
 		if win != nil {
-			window_toggle_suspended(win)
+			active := !sync.atomic_load(&win.active)
+			set_window_active(win, active)
+			if active {
+				sync.auto_reset_event_signal(&g_wakeup_renderer)
+			}
 		}
 	case CmdWindowProgram:
 		win := g_windows[cmd.window_id]
 		if win != nil {
-			program_info := ProgramInfo {
+			req := CompileRequest {
+				ren    = &win.ren,
 				path   = transmute(string)cmd.path,
 				source = transmute(string)cmd.source,
 			}
-			compiler_worker_submit(&win.compiler_worker, program_info)
+			compiler_submit(&g_compiler, req)
 		}
-	}
-}
-
-wait_for_window :: proc() {
-	if len(g_ctx.fences) > 0 {
-		vk_try(
-			vk.WaitForFences(
-				g_ctx.vkc.device,
-				u32(len(g_ctx.fences)),
-				raw_data(g_ctx.fences),
-				false,
-				max(u64),
-			),
-		)
 	}
 }
 
 render_proc :: proc() {
 	push: PushConstants
+	fences := make([dynamic]vk.Fence)
 	for !sync.atomic_load(&g_should_exit) {
+		clear(&fences)
 		sync.lock(&g_window_mtx)
-		wait_for_window()
-		rendered := false
 		for _, win in g_windows {
-			if sync.atomic_load(&win.suspended) {
-				continue
+			if should_render(win) {
+				append(&fences, win.ren.render_fence)
 			}
-			if !win.native.configured {
-				continue
-			}
-			width := f32(win.native.width) * win.native.scale
-			height := f32(win.native.height) * win.native.scale
-			push.time = f32(time.duration_seconds(time.stopwatch_duration(win.timer)))
-			push.aspect_ratio = f32(width) / f32(height)
-			render_info := RenderInfo {
-				width     = u32(min(TARGET_WIDTH, width)),
-				height    = u32(min(TARGET_HEIGHT, height)),
-				constants = push,
-			}
-			rendered |= render(&win.ren, &win.glow, &render_info)
 		}
 		sync.unlock(&g_window_mtx)
 
+		rendered := false
+		if len(fences) > 0 {
+			vk_try(
+				vk.WaitForFences(
+					g_ctx.vkc.device,
+					u32(len(fences)),
+					raw_data(fences),
+					false,
+					max(u64),
+				),
+			)
+			sync.lock(&g_window_mtx)
+			for _, win in g_windows {
+				if should_render(win) {
+					width := f32(win.native.width) * win.native.scale
+					height := f32(win.native.height) * win.native.scale
+					push.time = f32(time.duration_seconds(time.stopwatch_duration(win.timer)))
+					push.aspect_ratio = f32(width) / f32(height)
+					render_info := RenderInfo {
+						width     = u32(min(TARGET_WIDTH, width)),
+						height    = u32(min(TARGET_HEIGHT, height)),
+						constants = push,
+					}
+					rendered |= render(&win.ren, &render_info)
+				}
+			}
+			sync.unlock(&g_window_mtx)
+		}
 		if !rendered {
-			time.sleep(time.Millisecond * 1)
+			sync.auto_reset_event_wait(&g_wakeup_renderer)
 		}
 	}
 }
 
 shutdown :: proc() {
+	compiler_stop(&g_compiler)
 	sync.atomic_store(&g_should_exit, true)
-	thread.join(render_thread)
+	sync.auto_reset_event_signal(&g_wakeup_renderer)
+	thread.join(g_render_thread)
 
 	if g_ctx.vkc.device != {} {
 		vk.DeviceWaitIdle(g_ctx.vkc.device)
-
 		for _, glow_win in g_windows {
 			destroy_window(glow_win)
 		}
+		destroy_resource_manager(&g_ctx.res)
 		destroy_vulkan_context(&g_ctx.vkc)
 	}
 	if g_ctx.instance != {} {
@@ -219,10 +242,5 @@ shutdown :: proc() {
 		g_ctx.slang->release()
 	}
 	gwin.destroy_wayland_context(&g_wayland)
-
-	delete(g_windows)
-	delete(g_windowFences)
-
 	log.info("Goodbye")
 }
-

@@ -573,7 +573,11 @@ show_window :: proc(win: ^WaylandWindow) {
 			win.surface,
 		)
 		if win.fractional_scale != nil {
-			wl.fractional_scale_v1_add_listener(win.fractional_scale, &fractional_scale_listener, win)
+			wl.fractional_scale_v1_add_listener(
+				win.fractional_scale,
+				&fractional_scale_listener,
+				win,
+			)
 		}
 	}
 
@@ -628,12 +632,12 @@ destroy_window :: proc(win: ^WaylandWindow) {
 	free(win)
 }
 
+get_display_fd :: proc(ctx: ^WaylandContext) -> int {
+	return wl.display_get_fd(ctx.display)
+}
+
 dispatch_events :: proc(ctx: ^WaylandContext) -> bool {
-	if wl.display_dispatch_pending(ctx.display) < 0 {
-		return false
-	}
-	wl.display_flush(ctx.display)
-	return true
+	return wl.display_dispatch(ctx.display) > 0
 }
 
 create_vulkan_surface :: proc(
@@ -679,3 +683,4 @@ set_window_fullscreen :: proc(win: ^WaylandWindow, fullscreen: bool) {
 	}
 	win.fullscreen = fullscreen
 }
+

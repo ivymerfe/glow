@@ -1,6 +1,7 @@
 package glow
 
 import "core:log"
+import "core:sync"
 import vk "vendor:vulkan"
 
 Swapchain :: struct {
@@ -24,6 +25,7 @@ GlowRenderer :: struct {
 	cmd_pool:                   vk.CommandPool,
 	cmd_buffer:                 vk.CommandBuffer,
 	render_fence:               vk.Fence,
+	context_swapper:            ContextSwapper,
 }
 
 create_renderer :: proc(
@@ -102,16 +104,15 @@ resize_swapchain :: proc(ren: ^GlowRenderer, new_width: int, new_height: int) {
 	recreate_swapchain(ren)
 }
 
-render :: proc(ren: ^GlowRenderer, glow_context: ^GlowContext, render_info: ^RenderInfo) -> bool {
+render :: proc(ren: ^GlowRenderer, render_info: ^RenderInfo) -> bool {
 	fence_status := vk.GetFenceStatus(ren.device, ren.render_fence)
 	if fence_status == .NOT_READY {
 		return false
 	}
-	maybe_load_program(glow_context)
-	if !glow_context.program_loaded {
+	if !sync.atomic_load(&ren.context_swapper.ready) {
 		return false
 	}
-	
+	ctx := swapper_get_current(&ren.context_swapper)
 	swapchain := ren.swapchain
 
 	sem_image_available := ren.image_available_semaphore
@@ -144,7 +145,7 @@ render :: proc(ren: ^GlowRenderer, glow_context: ^GlowContext, render_info: ^Ren
 	}
 	vk.BeginCommandBuffer(cmd_buffer, &begin_info)
 
-	draw_context(glow_context, cmd_buffer, render_info)
+	draw_context(ctx, cmd_buffer, render_info)
 
 	transition_image_layout(
 		cmd_buffer,
@@ -171,7 +172,7 @@ render :: proc(ren: ^GlowRenderer, glow_context: ^GlowContext, render_info: ^Ren
 	}
 	vk.CmdBlitImage(
 		cmd_buffer,
-		glow_context.target.image,
+		ctx.res.target.image,
 		.TRANSFER_SRC_OPTIMAL,
 		swapchain_image,
 		.TRANSFER_DST_OPTIMAL,

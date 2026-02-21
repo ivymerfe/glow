@@ -8,14 +8,12 @@ import "gwin"
 import vk "vendor:vulkan"
 
 GlowWindow :: struct {
-	id:              u32,
-	native:          ^gwin.WaylandWindow,
-	ren:             GlowRenderer,
-	glow:            GlowContext,
-	timer:           time.Stopwatch,
-	suspended:       bool,
-	compiler_worker: CompilerWorker,
-	vk_surface:      vk.SurfaceKHR,
+	id:      u32,
+	native:  ^gwin.WaylandWindow,
+	ren:     GlowRenderer,
+	visible: bool,
+	active:  bool,
+	timer:   time.Stopwatch,
 }
 
 create_window :: proc(ctx: ^gwin.WaylandContext, window_id: u32, win: ^GlowWindow) {
@@ -30,34 +28,36 @@ create_window :: proc(ctx: ^gwin.WaylandContext, window_id: u32, win: ^GlowWindo
 	if !ok {
 		log.panic("Failed to create Vulkan surface")
 	}
-	win.vk_surface = surface
 	if g_ctx.vkc == {} {
 		g_ctx.vkc = create_vulkan_context(g_ctx.instance, surface)
+		create_resource_manager(&g_ctx.res, g_ctx.vkc, TARGET_WIDTH, TARGET_HEIGHT)
 	}
 	win.ren = create_renderer(g_ctx.vkc, surface, SWAPCHAIN_WIDTH, SWAPCHAIN_HEIGHT)
-	win.glow = create_glow_context(g_ctx.vkc, TARGET_WIDTH, TARGET_HEIGHT)
-	compiler_worker_start(&win.compiler_worker, &win.glow)
+	win.visible = true
+	win.active = true
 	time.stopwatch_start(&win.timer)
 }
 
 destroy_window :: proc(win: ^GlowWindow) {
-	compiler_worker_stop(&win.compiler_worker)
-
 	wait_renderer(&win.ren)
-	destroy_glow_context(&win.glow)
 	destroy_renderer(&win.ren)
 
 	gwin.destroy_window(win.native)
 }
 
-window_toggle_suspended :: proc(win_ptr: ^GlowWindow) {
-	suspended := sync.atomic_load(&win_ptr.suspended)
-	if suspended {
-		sync.atomic_store(&win_ptr.suspended, false)
-		time.stopwatch_start(&win_ptr.timer)
+set_window_active :: proc(win: ^GlowWindow, active: bool) {
+	sync.atomic_store(&win.active, active)
+	if active {
+		time.stopwatch_start(&win.timer)
 	} else {
-		sync.atomic_store(&win_ptr.suspended, true)
-		time.stopwatch_stop(&win_ptr.timer)
+		time.stopwatch_stop(&win.timer)
 	}
 }
 
+should_render :: proc(win: ^GlowWindow) -> bool {
+	return(
+		sync.atomic_load(&win.visible) &&
+		sync.atomic_load(&win.active) &&
+		sync.atomic_load(&win.ren.context_swapper.ready) \
+	)
+}

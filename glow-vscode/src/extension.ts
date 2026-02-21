@@ -11,7 +11,6 @@ function isShaderDocument(doc: vscode.TextDocument): boolean {
 }
 
 const glow = new GlowClient();
-
 const pendingUpdateTimers = new Map<string, NodeJS.Timeout>();
 
 function cancelPendingUpdate(key: string) {
@@ -19,7 +18,7 @@ function cancelPendingUpdate(key: string) {
   if (t) clearTimeout(t);
   pendingUpdateTimers.delete(key);
 }
-
+ 
 function scheduleUpdate(key: string, fn: () => void, debounceMs = 75) {
   cancelPendingUpdate(key);
   const t = setTimeout(() => {

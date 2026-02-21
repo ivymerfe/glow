@@ -9,7 +9,8 @@
         "--extensionDevelopmentPath=${workspaceFolder}",
         "--disable-extensions"
       ],
-      "outFiles": ["${workspaceFolder}/out/**/*.js"]
+      "cwd": "${workspaceFolder}/glow-vscode",
+      "outFiles": ["${workspaceFolder}/glow-vscode/out/**/*.js"]
     }
   ]
 }
