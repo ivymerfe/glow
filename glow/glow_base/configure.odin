@@ -1,4 +1,4 @@
-package glow
+package glow_base
 
 import vk "vendor:vulkan"
 

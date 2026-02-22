@@ -1,4 +1,4 @@
-package glow
+package glow_wayland
 
 import "core:os"
 

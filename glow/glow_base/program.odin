@@ -1,50 +1,98 @@
-package glow
+package glow_base
 
+import slang "../odin_slang"
+import "core:log"
+import "core:time"
 import vk "vendor:vulkan"
 
-PushConstants :: struct {
-	camera_pos:       [4]f32,
-	camera_forward:   [4]f32,
-	camera_right:     [4]f32,
-	camera_up:        [4]f32,
-	mouse_pos:        [2]f32,
-	mouse_data:       [2]u32,
-	keyboard_pressed: [4]u32,
-	keyboard_down:    [4]u32,
-	aspect_ratio:     f32,
-	time:             f32,
-	frame_index:      u32,
-}
-
-GlowContext :: struct {
+GlowProgram :: struct {
 	using vk_context: VulkanContext,
 	res:              ^ResourceManager,
 	pipeline:         vk.Pipeline,
 	layout:           vk.PipelineLayout,
 }
 
-RenderInfo :: struct {
-	width:     u32,
-	height:    u32,
-	constants: PushConstants,
-}
+compile_program :: proc(
+	prog: ^GlowProgram,
+	res: ^ResourceManager,
+	global: ^slang.IGlobalSession,
+	path: cstring,
+	source: cstring,
+) -> (
+	success: bool,
+) {
+	time_start := time.now()
+	defer {
+		elapsed := time.duration_milliseconds(time.diff(time_start, time.now()))
+		log.debugf("[%s] -> %.2f ms", path, elapsed)
+	}
 
-create_context :: proc(ctx: ^GlowContext, res: ^ResourceManager, program: ^GlowProgram) {
-	ctx.vk_context = res.vk_context
-	ctx.res = res
+	session := create_slang_session(global)
+	defer session->release()
 
+	diagnostics: ^slang.IBlob
+	slang_module := session->loadModuleFromSourceString("shader", path, source, &diagnostics)
+	diagnostics_check(path, diagnostics)
+	if slang_module == nil {
+		return
+	}
+
+	fragment_entry: ^slang.IEntryPoint
+	slang_module->findEntryPointByName("main", &fragment_entry)
+	if fragment_entry == nil {
+		log.debugf("[%s] failed to find fragment entry point", path)
+		return
+	}
+	components: [2]^slang.IComponentType = {slang_module, fragment_entry}
+
+	composed_program: ^slang.IComponentType
+	slang_check(
+		session->createCompositeComponentType(
+			&components[0],
+			len(components),
+			&composed_program,
+			&diagnostics,
+		),
+	)
+	diagnostics_check(path, diagnostics)
+	if composed_program == nil {
+		return
+	}
+	defer composed_program->release()
+
+	linked_program: ^slang.IComponentType
+	slang_check(composed_program->link(&linked_program, &diagnostics))
+	diagnostics_check(path, diagnostics)
+	if linked_program == nil {
+		return
+	}
+	defer linked_program->release()
+
+	target_code: ^slang.IBlob
+	slang_check(linked_program->getTargetCode(0, &target_code, &diagnostics))
+	diagnostics_check(path, diagnostics)
+	if target_code == nil {
+		return
+	}
+	defer target_code->release()
+
+	prog.vk_context = res.vk_context
+	prog.res = res
 	module: vk.ShaderModule
 	create_info := vk.ShaderModuleCreateInfo {
 		sType    = .SHADER_MODULE_CREATE_INFO,
-		codeSize = int(program.code->getBufferSize()),
-		pCode    = auto_cast program.code->getBufferPointer(),
+		codeSize = int(target_code->getBufferSize()),
+		pCode    = auto_cast target_code->getBufferPointer(),
 	}
-	vk_try(vk.CreateShaderModule(ctx.device, &create_info, nil, &module))
-	create_pipeline(ctx, module)
-	vk.DestroyShaderModule(ctx.device, module, nil)
+	vk_try(vk.CreateShaderModule(prog.device, &create_info, nil, &module))
+	defer vk.DestroyShaderModule(prog.device, module, nil)
+
+	create_pipeline(prog, module)
+	success = true
+	return
 }
 
-destroy_context :: proc(ctx: ^GlowContext) {
+destroy_program :: proc(ctx: ^GlowProgram) {
 	if ctx.pipeline != {} {
 		vk.DestroyPipeline(ctx.device, ctx.pipeline, nil)
 	}
@@ -53,8 +101,8 @@ destroy_context :: proc(ctx: ^GlowContext) {
 	}
 }
 
-draw_context :: proc(ctx: ^GlowContext, cmd: vk.CommandBuffer, render_info: ^RenderInfo) {
-	target := &ctx.res.target
+draw_program :: proc(prog: ^GlowProgram, cmd: vk.CommandBuffer, render_info: ^RenderInfo) {
+	target := &prog.res.target
 
 	src_stage := vk.PipelineStageFlags2.TOP_OF_PIPE
 	src_access := vk.AccessFlags2{}
@@ -94,7 +142,7 @@ draw_context :: proc(ctx: ^GlowContext, cmd: vk.CommandBuffer, render_info: ^Ren
 	}
 	vk.CmdBeginRendering(cmd, &rendering_info)
 
-	vk.CmdBindPipeline(cmd, .GRAPHICS, ctx.pipeline)
+	vk.CmdBindPipeline(cmd, .GRAPHICS, prog.pipeline)
 
 	width := render_info.width
 	height := render_info.height
@@ -116,7 +164,7 @@ draw_context :: proc(ctx: ^GlowContext, cmd: vk.CommandBuffer, render_info: ^Ren
 
 	vk.CmdPushConstants(
 		cmd,
-		ctx.layout,
+		prog.layout,
 		{.VERTEX, .FRAGMENT},
 		0,
 		size_of(PushConstants),
@@ -141,7 +189,7 @@ draw_context :: proc(ctx: ^GlowContext, cmd: vk.CommandBuffer, render_info: ^Ren
 }
 
 @(private = "file")
-create_pipeline :: proc(ctx: ^GlowContext, ps_module: vk.ShaderModule) {
+create_pipeline :: proc(prog: ^GlowProgram, ps_module: vk.ShaderModule) {
 	push_constant_ranges := []vk.PushConstantRange {
 		{stageFlags = {.VERTEX, .FRAGMENT}, offset = 0, size = size_of(PushConstants)},
 	}
@@ -151,7 +199,7 @@ create_pipeline :: proc(ctx: ^GlowContext, ps_module: vk.ShaderModule) {
 		pPushConstantRanges    = raw_data(push_constant_ranges),
 		setLayoutCount         = 0,
 	}
-	vk_try(vk.CreatePipelineLayout(ctx.device, &layout_info, nil, &ctx.layout))
+	vk_try(vk.CreatePipelineLayout(prog.device, &layout_info, nil, &prog.layout))
 
 	dynamic_states := []vk.DynamicState{.VIEWPORT, .SCISSOR}
 	dynamic_state := vk.PipelineDynamicStateCreateInfo {
@@ -201,7 +249,7 @@ create_pipeline :: proc(ctx: ^GlowContext, ps_module: vk.ShaderModule) {
 	vertex_shader_info := vk.PipelineShaderStageCreateInfo {
 		sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 		stage  = {.VERTEX},
-		module = ctx.res.vs_fullscreen,
+		module = prog.res.vs_fullscreen,
 		pName  = "main",
 	}
 	pixel_shader_info := vk.PipelineShaderStageCreateInfo {
@@ -232,9 +280,9 @@ create_pipeline :: proc(ctx: ^GlowContext, ps_module: vk.ShaderModule) {
 		pColorBlendState    = &color_blending,
 		pDynamicState       = &dynamic_state,
 		pDepthStencilState  = &depth_stencil_state,
-		layout              = ctx.layout,
+		layout              = prog.layout,
 		subpass             = 0,
 		basePipelineIndex   = -1,
 	}
-	vk_try(vk.CreateGraphicsPipelines(ctx.device, 0, 1, &pipeline_info, nil, &ctx.pipeline))
+	vk_try(vk.CreateGraphicsPipelines(prog.device, 0, 1, &pipeline_info, nil, &prog.pipeline))
 }

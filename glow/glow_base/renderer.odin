@@ -1,4 +1,4 @@
-package glow
+package glow_base
 
 import "core:log"
 import "core:sync"
@@ -25,7 +25,27 @@ GlowRenderer :: struct {
 	cmd_pool:                   vk.CommandPool,
 	cmd_buffer:                 vk.CommandBuffer,
 	render_fence:               vk.Fence,
-	context_swapper:            ContextSwapper,
+	context_buffer:             ProgramBuffer,
+}
+
+PushConstants :: struct {
+	camera_pos:       [4]f32,
+	camera_forward:   [4]f32,
+	camera_right:     [4]f32,
+	camera_up:        [4]f32,
+	mouse_pos:        [2]f32,
+	mouse_data:       [2]u32,
+	keyboard_pressed: [4]u32,
+	keyboard_down:    [4]u32,
+	aspect_ratio:     f32,
+	time:             f32,
+	frame_index:      u32,
+}
+
+RenderInfo :: struct {
+	width:     u32,
+	height:    u32,
+	constants: PushConstants,
 }
 
 create_renderer :: proc(
@@ -109,10 +129,10 @@ render :: proc(ren: ^GlowRenderer, render_info: ^RenderInfo) -> bool {
 	if fence_status == .NOT_READY {
 		return false
 	}
-	if !sync.atomic_load(&ren.context_swapper.ready) {
+	if !sync.atomic_load(&ren.context_buffer.ready) {
 		return false
 	}
-	ctx := swapper_get_current(&ren.context_swapper)
+	prog := program_buffer_get(&ren.context_buffer)
 	swapchain := ren.swapchain
 
 	sem_image_available := ren.image_available_semaphore
@@ -145,7 +165,7 @@ render :: proc(ren: ^GlowRenderer, render_info: ^RenderInfo) -> bool {
 	}
 	vk.BeginCommandBuffer(cmd_buffer, &begin_info)
 
-	draw_context(ctx, cmd_buffer, render_info)
+	draw_program(prog, cmd_buffer, render_info)
 
 	transition_image_layout(
 		cmd_buffer,
@@ -172,7 +192,7 @@ render :: proc(ren: ^GlowRenderer, render_info: ^RenderInfo) -> bool {
 	}
 	vk.CmdBlitImage(
 		cmd_buffer,
-		ctx.res.target.image,
+		prog.res.target.image,
 		.TRANSFER_SRC_OPTIMAL,
 		swapchain_image,
 		.TRANSFER_DST_OPTIMAL,
@@ -391,3 +411,4 @@ choose_swapchain_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentM
 	// }
 	return .FIFO
 }
+
