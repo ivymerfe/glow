@@ -1,9 +1,9 @@
-package glow_wayland
+package glow
 
-import glow "../glow_base"
-import slang "../odin_slang"
 import "base:runtime"
+import "glowr"
 import "gwin"
+import "slang"
 import vk "vendor:vulkan"
 
 SWAPCHAIN_WIDTH :: 1920
@@ -13,10 +13,10 @@ TARGET_HEIGHT :: 1080
 
 GlobalContext :: struct {
 	app:      runtime.Context,
-	vkc:      glow.VulkanContext,
+	vkc:      glowr.VulkanContext,
 	instance: vk.Instance,
 	slang:    ^slang.IGlobalSession,
-	res:      glow.ResourceManager,
+	res:      glowr.ResourceManager,
 	wayland:  gwin.WaylandContext,
 	compiler: CompilerThread,
 	renderer: RenderThread,

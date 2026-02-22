@@ -1,9 +1,9 @@
-package glow_base
+package glowr
 
 import "core:log"
 import "core:slice"
 
-import slang "../odin_slang"
+import "../slang"
 
 slang_check :: proc(result: slang.Result, loc := #caller_location) {
 	if result != slang.OK {
@@ -42,4 +42,3 @@ create_slang_session :: proc(global: ^slang.IGlobalSession) -> (session: ^slang.
 	slang_check(global->createSession(session_desc, &session))
 	return
 }
-

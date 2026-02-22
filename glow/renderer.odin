@@ -1,17 +1,17 @@
-package glow_wayland
+package glow
 
-import glow "../glow_base"
 import "core:sync"
 import "core:thread"
 import "core:time"
+import "glowr"
 import vk "vendor:vulkan"
 
 RenderThread :: struct {
-	thread: ^thread.Thread,
-	mtx:    sync.Mutex,
-	evt:    sync.Auto_Reset_Event,
-    windows:  map[u32]^GlowWindow,
-	stop:   bool,
+	thread:  ^thread.Thread,
+	mtx:     sync.Mutex,
+	evt:     sync.Auto_Reset_Event,
+	windows: map[u32]^GlowWindow,
+	stop:    bool,
 }
 
 renderer_start :: proc(r: ^RenderThread) {
@@ -68,22 +68,22 @@ renderer_destroy_window :: proc(r: ^RenderThread, window_id: u32) {
 }
 
 renderer_get_window :: proc(r: ^RenderThread, window_id: u32) -> ^GlowWindow {
-    return r.windows[window_id]
+	return r.windows[window_id]
 }
 
 renderer_destroy_all_windows :: proc(r: ^RenderThread) {
-    renderer_lock(r)
-    for _, win in r.windows {
-        destroy_window(win)
-    }
-    clear(&r.windows)
-    renderer_unlock(r)
+	renderer_lock(r)
+	for _, win in r.windows {
+		destroy_window(win)
+	}
+	clear(&r.windows)
+	renderer_unlock(r)
 }
 
 render_proc :: proc(raw: rawptr) {
 	r := cast(^RenderThread)raw
 
-	push: glow.PushConstants
+	push: glowr.PushConstants
 	fences := make([dynamic]vk.Fence)
 	for !sync.atomic_load(&r.stop) {
 		clear(&fences)
@@ -97,7 +97,7 @@ render_proc :: proc(raw: rawptr) {
 
 		rendered := false
 		if len(fences) > 0 {
-			glow.vk_try(
+			glowr.vk_try(
 				vk.WaitForFences(
 					g_ctx.vkc.device,
 					u32(len(fences)),
@@ -113,12 +113,12 @@ render_proc :: proc(raw: rawptr) {
 					height := f32(win.native.height) * win.native.scale
 					push.time = f32(time.duration_seconds(time.stopwatch_duration(win.timer)))
 					push.aspect_ratio = f32(width) / f32(height)
-					render_info := glow.RenderInfo {
+					render_info := glowr.RenderInfo {
 						width     = u32(min(TARGET_WIDTH, width)),
 						height    = u32(min(TARGET_HEIGHT, height)),
 						constants = push,
 					}
-					rendered |= glow.render(&win.ren, &render_info)
+					rendered |= glowr.render(&win.ren, &render_info)
 				}
 			}
 			renderer_unlock(r)

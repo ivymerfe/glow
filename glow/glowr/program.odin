@@ -1,11 +1,11 @@
-package glow_base
+package glowr
 
-import slang "../odin_slang"
+import "../slang"
 import "core:log"
 import "core:time"
 import vk "vendor:vulkan"
 
-GlowProgram :: struct {
+Program :: struct {
 	using vk_context: VulkanContext,
 	res:              ^ResourceManager,
 	pipeline:         vk.Pipeline,
@@ -13,7 +13,7 @@ GlowProgram :: struct {
 }
 
 compile_program :: proc(
-	prog: ^GlowProgram,
+	prog: ^Program,
 	res: ^ResourceManager,
 	global: ^slang.IGlobalSession,
 	path: cstring,
@@ -92,7 +92,7 @@ compile_program :: proc(
 	return
 }
 
-destroy_program :: proc(ctx: ^GlowProgram) {
+destroy_program :: proc(ctx: ^Program) {
 	if ctx.pipeline != {} {
 		vk.DestroyPipeline(ctx.device, ctx.pipeline, nil)
 	}
@@ -101,7 +101,7 @@ destroy_program :: proc(ctx: ^GlowProgram) {
 	}
 }
 
-draw_program :: proc(prog: ^GlowProgram, cmd: vk.CommandBuffer, render_info: ^RenderInfo) {
+draw_program :: proc(prog: ^Program, cmd: vk.CommandBuffer, render_info: ^RenderInfo) {
 	target := &prog.res.target
 
 	src_stage := vk.PipelineStageFlags2.TOP_OF_PIPE
@@ -189,7 +189,7 @@ draw_program :: proc(prog: ^GlowProgram, cmd: vk.CommandBuffer, render_info: ^Re
 }
 
 @(private = "file")
-create_pipeline :: proc(prog: ^GlowProgram, ps_module: vk.ShaderModule) {
+create_pipeline :: proc(prog: ^Program, ps_module: vk.ShaderModule) {
 	push_constant_ranges := []vk.PushConstantRange {
 		{stageFlags = {.VERTEX, .FRAGMENT}, offset = 0, size = size_of(PushConstants)},
 	}

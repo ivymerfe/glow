@@ -1,17 +1,17 @@
-package glow_base
+package glowr
 
 import "core:sync"
 
 ProgramBuffer :: struct {
-	current:     GlowProgram,
-	next:        GlowProgram,
+	current:     Program,
+	next:        Program,
 	swap_mutex:  sync.Mutex,
 	has_current: bool,
 	should_swap: bool,
 	ready:       bool,
 }
 
-program_buffer_set :: proc(swapper: ^ProgramBuffer, ctx: GlowProgram) {
+program_buffer_set :: proc(swapper: ^ProgramBuffer, ctx: Program) {
 	sync.lock(&swapper.swap_mutex)
 	if swapper.should_swap {
 		destroy_program(&swapper.next)
@@ -22,7 +22,7 @@ program_buffer_set :: proc(swapper: ^ProgramBuffer, ctx: GlowProgram) {
 	sync.atomic_store(&swapper.ready, true)
 }
 
-program_buffer_get :: proc(swapper: ^ProgramBuffer) -> ^GlowProgram {
+program_buffer_get :: proc(swapper: ^ProgramBuffer) -> ^Program {
 	if sync.atomic_load(&swapper.should_swap) {
 		sync.lock(&swapper.swap_mutex)
 		if swapper.has_current {
@@ -39,4 +39,3 @@ program_buffer_get :: proc(swapper: ^ProgramBuffer) -> ^GlowProgram {
 	current := &swapper.current
 	return current
 }
-

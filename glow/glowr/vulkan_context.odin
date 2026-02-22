@@ -1,10 +1,9 @@
-package glow_base
+package glowr
 
 import "base:runtime"
 import "core:dynlib"
 import "core:log"
 import vk "vendor:vulkan"
-
 
 VulkanContext :: struct {
 	instance:           vk.Instance,

@@ -1,4 +1,4 @@
-package glow_base
+package glowr
 
 import "core:log"
 import vk "vendor:vulkan"
@@ -57,14 +57,13 @@ create_resource_manager :: proc(
 }
 
 destroy_resource_manager :: proc(res: ^ResourceManager) {
-    device := res.vk_context.device
+	device := res.vk_context.device
 
-    vk.DestroyDescriptorPool(device, res.descriptor_pool, nil)
-    vk.DestroyShaderModule(device, res.vs_fullscreen, nil)
+	vk.DestroyDescriptorPool(device, res.descriptor_pool, nil)
+	vk.DestroyShaderModule(device, res.vs_fullscreen, nil)
 
-    destroy_image(res, &res.target)
+	destroy_image(res, &res.target)
 }
-
 
 
 create_image :: proc(vk_context: ^VulkanContext, width: u32, height: u32) -> GlowImage {

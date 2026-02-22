@@ -1,4 +1,4 @@
-package glow_base
+package glowr
 
 import "core:log"
 import os "core:os"
@@ -64,8 +64,7 @@ try_allocate :: proc(
 ) {
 	type_filter := mem_requirements.memoryTypeBits
 	for i in 0 ..< vkc.mem_props.memoryTypeCount {
-		if bool(type_filter & (1 << i)) &&
-		   props <= vkc.mem_props.memoryTypes[i].propertyFlags {
+		if bool(type_filter & (1 << i)) && props <= vkc.mem_props.memoryTypes[i].propertyFlags {
 			allocate_info := vk.MemoryAllocateInfo {
 				sType           = .MEMORY_ALLOCATE_INFO,
 				allocationSize  = mem_requirements.size,
@@ -109,18 +108,20 @@ create_2d_image :: proc(
 }
 
 create_image_view_2d :: proc(
-    vkc: ^VulkanContext,
-    image: vk.Image,
-    format: vk.Format,
-    aspect: vk.ImageAspectFlags,
-) -> (view: vk.ImageView) {
-    create_info := vk.ImageViewCreateInfo {
-        sType = .IMAGE_VIEW_CREATE_INFO,
-        image = image,
-        viewType = .D2,
-        format = format,
-        subresourceRange = {aspectMask = aspect, levelCount = 1, layerCount = 1},
-    }
-    vk_try(vk.CreateImageView(vkc.device, &create_info, nil, &view))
-    return
+	vkc: ^VulkanContext,
+	image: vk.Image,
+	format: vk.Format,
+	aspect: vk.ImageAspectFlags,
+) -> (
+	view: vk.ImageView,
+) {
+	create_info := vk.ImageViewCreateInfo {
+		sType = .IMAGE_VIEW_CREATE_INFO,
+		image = image,
+		viewType = .D2,
+		format = format,
+		subresourceRange = {aspectMask = aspect, levelCount = 1, layerCount = 1},
+	}
+	vk_try(vk.CreateImageView(vkc.device, &create_info, nil, &view))
+	return
 }

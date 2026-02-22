@@ -1,4 +1,4 @@
-package glow_base
+package glowr
 
 import "core:log"
 import "core:sync"
@@ -12,7 +12,7 @@ Swapchain :: struct {
 	image_views: []vk.ImageView,
 }
 
-GlowRenderer :: struct {
+Renderer :: struct {
 	using vk_context:           VulkanContext,
 	surface:                    vk.SurfaceKHR,
 	surface_format:             vk.SurfaceFormatKHR,
@@ -53,8 +53,8 @@ create_renderer :: proc(
 	surface: vk.SurfaceKHR,
 	swapchain_width: int,
 	swapchain_height: int,
-) -> GlowRenderer {
-	ren: GlowRenderer
+) -> Renderer {
+	ren: Renderer
 	ren.vk_context = vkc
 	ren.surface = surface
 
@@ -97,7 +97,7 @@ create_renderer :: proc(
 	return ren
 }
 
-destroy_renderer :: proc(ren: ^GlowRenderer) {
+destroy_renderer :: proc(ren: ^Renderer) {
 	destroy_swapchain(ren, &ren.swapchain)
 
 	vk.DestroySurfaceKHR(ren.instance, ren.surface, nil)
@@ -112,19 +112,19 @@ destroy_renderer :: proc(ren: ^GlowRenderer) {
 	vk.DestroyCommandPool(ren.device, ren.cmd_pool, nil)
 }
 
-wait_renderer :: proc(ren: ^GlowRenderer) {
+wait_renderer :: proc(ren: ^Renderer) {
 	vk_try(vk.WaitForFences(ren.device, 1, &ren.render_fence, true, max(u64)))
 	vk_try(vk.QueueWaitIdle(ren.present_queue))
 }
 
-resize_swapchain :: proc(ren: ^GlowRenderer, new_width: int, new_height: int) {
+resize_swapchain :: proc(ren: ^Renderer, new_width: int, new_height: int) {
 	wait_renderer(ren)
 	ren.swapchain_width = new_width
 	ren.swapchain_height = new_height
 	recreate_swapchain(ren)
 }
 
-render :: proc(ren: ^GlowRenderer, render_info: ^RenderInfo) -> bool {
+render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 	fence_status := vk.GetFenceStatus(ren.device, ren.render_fence)
 	if fence_status == .NOT_READY {
 		return false
@@ -246,7 +246,7 @@ render :: proc(ren: ^GlowRenderer, render_info: ^RenderInfo) -> bool {
 	return true
 }
 
-recreate_swapchain :: proc(ren: ^GlowRenderer) {
+recreate_swapchain :: proc(ren: ^Renderer) {
 	new_swapchain: Swapchain
 	create_swapchain(ren, &new_swapchain, &ren.swapchain)
 	destroy_swapchain(ren, &ren.swapchain)
@@ -254,7 +254,7 @@ recreate_swapchain :: proc(ren: ^GlowRenderer) {
 }
 
 @(private = "file")
-get_surface_capabilities :: proc(ren: ^GlowRenderer) {
+get_surface_capabilities :: proc(ren: ^Renderer) {
 	formats_count: u32
 	vk_try(
 		vk.GetPhysicalDeviceSurfaceFormatsKHR(
@@ -298,11 +298,7 @@ get_surface_capabilities :: proc(ren: ^GlowRenderer) {
 }
 
 @(private = "file")
-create_swapchain :: proc(
-	ren: ^GlowRenderer,
-	new_swapchain: ^Swapchain,
-	old_swapchain: ^Swapchain,
-) {
+create_swapchain :: proc(ren: ^Renderer, new_swapchain: ^Swapchain, old_swapchain: ^Swapchain) {
 	capabilities: vk.SurfaceCapabilitiesKHR
 	vk_try(
 		vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(
@@ -383,7 +379,7 @@ create_swapchain :: proc(
 }
 
 @(private = "file")
-destroy_swapchain :: proc(ren: ^GlowRenderer, swapchain: ^Swapchain) {
+destroy_swapchain :: proc(ren: ^Renderer, swapchain: ^Swapchain) {
 	for image_view in swapchain.image_views {
 		vk.DestroyImageView(ren.device, image_view, nil)
 	}
@@ -411,4 +407,3 @@ choose_swapchain_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentM
 	// }
 	return .FIFO
 }
-

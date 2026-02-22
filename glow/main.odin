@@ -1,4 +1,4 @@
-package glow_wayland
+package glow
 
 import "base:runtime"
 import "core:log"
@@ -7,10 +7,10 @@ import "core:sync"
 import "core:sys/linux"
 import "core:time"
 
-import glow "../glow_base"
-import slang "../odin_slang"
+import "glowr"
 import "gwin"
 import xkb "gwin/xkbcommon"
+import "slang"
 import vk "vendor:vulkan"
 
 
@@ -27,12 +27,12 @@ main :: proc() {
 	wl_init_time := time.duration_milliseconds(time.diff(launch_time, wl_init_end))
 	log.infof("Wl init -> %.2f ms", wl_init_time)
 
-	g_ctx.instance = glow.create_vk_instance()
+	g_ctx.instance = glowr.create_vk_instance()
 	vk_init_end := time.now()
 	vk_init_time := time.duration_milliseconds(time.diff(wl_init_end, vk_init_end))
 	log.infof("Vk init -> %.2f ms", vk_init_time)
 
-	glow.slang_check(slang.createGlobalSession(slang.API_VERSION, &g_ctx.slang))
+	glowr.slang_check(slang.createGlobalSession(slang.API_VERSION, &g_ctx.slang))
 	slang_init_time := time.duration_milliseconds(time.diff(vk_init_end, time.now()))
 	log.infof("Slang init -> %.2f ms", slang_init_time)
 
@@ -144,8 +144,8 @@ shutdown :: proc() {
 	if g_ctx.vkc.device != {} {
 		vk.DeviceWaitIdle(g_ctx.vkc.device)
 		renderer_destroy_all_windows(&g_ctx.renderer)
-		glow.destroy_resource_manager(&g_ctx.res)
-		glow.destroy_vulkan_context(&g_ctx.vkc)
+		glowr.destroy_resource_manager(&g_ctx.res)
+		glowr.destroy_vulkan_context(&g_ctx.vkc)
 	}
 	if g_ctx.instance != {} {
 		vk.DestroyInstance(g_ctx.instance, nil)

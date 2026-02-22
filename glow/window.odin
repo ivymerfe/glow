@@ -1,17 +1,17 @@
-package glow_wayland
+package glow
 
 import "core:log"
 import "core:sync"
 import "core:time"
 
-import glow "../glow_base"
+import "glowr"
 import "gwin"
 import vk "vendor:vulkan"
 
 GlowWindow :: struct {
 	id:      u32,
 	native:  ^gwin.WaylandWindow,
-	ren:     glow.GlowRenderer,
+	ren:     glowr.Renderer,
 	visible: bool,
 	active:  bool,
 	timer:   time.Stopwatch,
@@ -30,18 +30,18 @@ create_window :: proc(ctx: ^gwin.WaylandContext, window_id: u32, win: ^GlowWindo
 		log.panic("Failed to create Vulkan surface")
 	}
 	if g_ctx.vkc == {} {
-		g_ctx.vkc = glow.create_vulkan_context(g_ctx.instance, surface)
-		glow.create_resource_manager(&g_ctx.res, g_ctx.vkc, TARGET_WIDTH, TARGET_HEIGHT)
+		g_ctx.vkc = glowr.create_vulkan_context(g_ctx.instance, surface)
+		glowr.create_resource_manager(&g_ctx.res, g_ctx.vkc, TARGET_WIDTH, TARGET_HEIGHT)
 	}
-	win.ren = glow.create_renderer(g_ctx.vkc, surface, SWAPCHAIN_WIDTH, SWAPCHAIN_HEIGHT)
+	win.ren = glowr.create_renderer(g_ctx.vkc, surface, SWAPCHAIN_WIDTH, SWAPCHAIN_HEIGHT)
 	win.visible = true
 	win.active = true
 	time.stopwatch_start(&win.timer)
 }
 
 destroy_window :: proc(win: ^GlowWindow) {
-	glow.wait_renderer(&win.ren)
-	glow.destroy_renderer(&win.ren)
+	glowr.wait_renderer(&win.ren)
+	glowr.destroy_renderer(&win.ren)
 
 	gwin.destroy_window(win.native)
 }

@@ -1,4 +1,4 @@
-package glow_base
+package glowr
 
 import "core:strings"
 

@@ -1,13 +1,13 @@
-package glow_wayland
+package glow
 
 import "core:strings"
 import "core:sync"
 import "core:thread"
 
-import glow "../glow_base"
+import "glowr"
 
 CompileRequest :: struct {
-	buf:    ^glow.ProgramBuffer,
+	buf:    ^glowr.ProgramBuffer,
 	path:   string,
 	source: string,
 }
@@ -64,10 +64,10 @@ compiler_proc :: proc(raw: rawptr) {
 		defer delete_cstring(path_c)
 		defer delete_cstring(source_c)
 
-		prog: glow.GlowProgram
-		success := glow.compile_program(&prog, &g_ctx.res, g_ctx.slang, path_c, source_c)
+		prog: glowr.Program
+		success := glowr.compile_program(&prog, &g_ctx.res, g_ctx.slang, path_c, source_c)
 		if success {
-			glow.program_buffer_set(request.buf, prog)
+			glowr.program_buffer_set(request.buf, prog)
 			renderer_wakeup(&g_ctx.renderer)
 		}
 	}
