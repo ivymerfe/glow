@@ -3,15 +3,15 @@ package slang
 import "core:c"
 
 when ODIN_OS == .Windows {
-	foreign import libslang "lib/slang.lib"
+	foreign import libslang "slang.lib"
 }
 
 when ODIN_OS == .Darwin {
-	foreign import libslang "lib/libslang.dylib"
+	foreign import libslang "libslang.dylib"
 }
 
 when ODIN_OS == .Linux {
-	foreign import libslang "lib/libslang-compiler.so.0.2026.1.1"
+	foreign import libslang "libslang-compiler.so"
 }
 
 // Note(Dragos): This is defined to be "pointer size". So ummmm check later

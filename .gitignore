@@ -1,6 +1,6 @@
 *.spv
 *.bin
-*.so.*
+*.so
 node_modules
 out
 *.vsix

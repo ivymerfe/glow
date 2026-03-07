@@ -187,7 +187,11 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 		dstSubresource = {aspectMask = {.COLOR}, layerCount = 1},
 		dstOffsets = [2]vk.Offset3D {
 			{0, 0, 0},
-			{i32(swapchain.extent.width), i32(swapchain.extent.height), 1},
+			{
+				i32(min(swapchain.extent.width, render_info.width)),
+				i32(min(swapchain.extent.height, render_info.height)),
+				1,
+			},
 		},
 	}
 	vk.CmdBlitImage(
