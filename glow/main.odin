@@ -72,7 +72,7 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 			renderer_destroy_window(&g_ctx.renderer, native.id)
 			msg_window_destroyed(native.id)
 			send_messages()
-		case xkb.XKB_KEY_f:
+		case xkb.XKB_KEY_e:
 			gwin.set_window_fullscreen(native, !native.fullscreen)
 		case xkb.XKB_KEY_v:
 			win := renderer_get_window(&g_ctx.renderer, native.id)
@@ -114,15 +114,6 @@ command_handler :: proc(cmd_union: GlowCommand) {
 		win := renderer_get_window(&g_ctx.renderer, cmd.window_id)
 		if win != nil {
 			gwin.set_window_fullscreen(win.native, !win.native.fullscreen)
-		}
-	case CmdWindowToggleSuspend:
-		win := renderer_get_window(&g_ctx.renderer, cmd.window_id)
-		if win != nil {
-			active := !sync.atomic_load(&win.active)
-			set_window_active(win, active)
-			if active {
-				renderer_wakeup(&g_ctx.renderer)
-			}
 		}
 	case CmdWindowProgram:
 		win := renderer_get_window(&g_ctx.renderer, cmd.window_id)

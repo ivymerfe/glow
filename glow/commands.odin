@@ -8,7 +8,6 @@ GlowCommandType :: enum u8 {
 	WINDOW_DESTROY,
 	WINDOW_VISIBLE,
 	WINDOW_FULLSCREEN,
-	WINDOW_SUSPEND,
 	WINDOW_PROGRAM,
 }
 
@@ -24,9 +23,6 @@ CmdWindowVisible :: struct {
 	visible:   bool,
 }
 CmdWindowToggleFullscreen :: struct {
-	window_id: u32,
-}
-CmdWindowToggleSuspend :: struct {
 	window_id: u32,
 }
 
@@ -50,7 +46,6 @@ GlowCommand :: union {
 	CmdWindowDestroy,
 	CmdWindowVisible,
 	CmdWindowToggleFullscreen,
-	CmdWindowToggleSuspend,
 	CmdWindowProgram,
 }
 
@@ -153,11 +148,6 @@ decode_command :: proc(typ: GlowCommandType, payload: []u8) -> GlowCommand {
 		window_id := read_u32_le_cursor(payload, &c)
 		ensure(c == len(payload), "Extra bytes in WINDOW_FULLSCREEN payload")
 		return CmdWindowToggleFullscreen{window_id = window_id}
-
-	case .WINDOW_SUSPEND:
-		window_id := read_u32_le_cursor(payload, &c)
-		ensure(c == len(payload), "Extra bytes in WINDOW_SUSPEND payload")
-		return CmdWindowToggleSuspend{window_id = window_id}
 
 	case .WINDOW_PROGRAM:
 		window_id := read_u32_le_cursor(payload, &c)

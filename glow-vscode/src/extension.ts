@@ -1,6 +1,5 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
-import type { GlowClientOptions } from "./client";
 import { GlowClient } from "./client";
 
 function isShaderDocument(doc: vscode.TextDocument): boolean {
@@ -18,7 +17,7 @@ function cancelPendingUpdate(key: string) {
   if (t) clearTimeout(t);
   pendingUpdateTimers.delete(key);
 }
- 
+
 function scheduleUpdate(key: string, fn: () => void, debounceMs = 75) {
   cancelPendingUpdate(key);
   const t = setTimeout(() => {
@@ -28,111 +27,81 @@ function scheduleUpdate(key: string, fn: () => void, debounceMs = 75) {
   pendingUpdateTimers.set(key, t);
 }
 
-function getActiveShaderDocument(options?: {
-  requireRunning?: boolean;
-  requirePreviewActive?: boolean;
-}): vscode.TextDocument | undefined {
-  const editor = vscode.window.activeTextEditor;
-  if (!editor) return undefined;
+glow.onError = (message) => {
+  void vscode.window.showErrorMessage(message);
+};
 
-  const doc = editor.document;
-  if (!isShaderDocument(doc)) {
-    void vscode.window.showWarningMessage("Glow: not a .slang/.slangh file.");
-    return undefined;
-  }
+glow.onWarning = (message) => {
+  void vscode.window.showWarningMessage(message);
+};
 
-  if (options?.requireRunning && !glow.isRunning()) {
-    void vscode.window.showErrorMessage(
-      "Glow: process isn't running. Check 'glow.executablePath'.",
-    );
-    return undefined;
-  }
+glow.onWindowClosed = (_windowId, key) => {
+  if (key) cancelPendingUpdate(key);
+};
 
-  if (
-    options?.requirePreviewActive &&
-    !glow.isPreviewActive(doc.uri.toString())
-  ) {
-    void vscode.window.showWarningMessage(
-      "Glow: no active preview for this file.",
-    );
-    return undefined;
-  }
+function startGlowIfNeeded() {
+  if (glow.isRunning()) return;
 
-  return doc;
+  const cfg = vscode.workspace.getConfiguration("glow");
+  const exe = cfg.get<string>("executablePath", "glow");
+  glow.start(exe);
 }
 
 export function activate(context: vscode.ExtensionContext) {
-  const cfg = vscode.workspace.getConfiguration("glow");
-  const exe = cfg.get<string>("executablePath", "glow");
-  const args = cfg.get<string[]>("args", []);
-  const options: GlowClientOptions = {
-    executablePath: exe,
-    args,
-    onError: (message) => {
-      void vscode.window.showErrorMessage(message);
-    },
-    onWarning: (message) => {
-      void vscode.window.showWarningMessage(message);
-    },
-    onStderr: (chunk) => {
-      console.log(`[Glow] ${chunk}`);
-    },
-    onWindowClosed: (_windowId, key) => {
-      if (key) cancelPendingUpdate(key);
-    },
-  };
-
-  glow.setOptions(options);
-  glow.start();
-
   context.subscriptions.push({
     dispose: () => {
       for (const t of pendingUpdateTimers.values()) clearTimeout(t);
       pendingUpdateTimers.clear();
-      glow.dispose();
+      glow.destroy();
     },
   });
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("glow.togglePreview", () => {
-      const doc = getActiveShaderDocument({ requireRunning: true });
-      if (!doc) return;
+    vscode.commands.registerCommand("glow.preview", () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        return;
+      }
+      const doc = editor.document;
+      if (!isShaderDocument(doc)) {
+        void vscode.window.showWarningMessage(
+          "Glow: not a .slang/.slangh file.",
+        );
+        return;
+      }
+      startGlowIfNeeded();
       const key = doc.uri.toString();
-      const action = glow.togglePreview(key, doc.uri.fsPath, doc.getText());
-      if (action === "closed") cancelPendingUpdate(key);
+      if (glow.isPreviewActive(key)) {
+        if (glow.isWindowVisible(key)) {
+          glow.toggleFullscreen(key);
+        } else {
+          glow.toggleWindowVisible(key);
+        }
+      } else {
+        glow.openPreview(key);
+        glow.updatePreview(key, doc.uri.fsPath, doc.getText());
+      }
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("glow.hideOrShowWindow", () => {
-      const doc = getActiveShaderDocument({
-        requireRunning: true,
-        requirePreviewActive: true,
-      });
-      if (!doc) return;
-      glow.toggleWindowVisible(doc.uri.toString());
+    vscode.commands.registerCommand("glow.stopPreview", () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        return;
+      }
+      const doc = editor.document;
+      glow.closePreview(doc.uri.toString());
     }),
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("glow.suspendWindow", () => {
-      const doc = getActiveShaderDocument({
-        requireRunning: true,
-        requirePreviewActive: true,
-      });
-      if (!doc) return;
-      glow.suspendWindow(doc.uri.toString());
-    }),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand("glow.fullscreenWindow", () => {
-      const doc = getActiveShaderDocument({
-        requireRunning: true,
-        requirePreviewActive: true,
-      });
-      if (!doc) return;
-      glow.toggleFullscreen(doc.uri.toString());
+    vscode.commands.registerCommand("glow.restart", () => {
+      if (glow.isRunning()) {
+        glow.destroy();
+        void vscode.window.showInformationMessage("Glow: restarting...");
+      }
+      startGlowIfNeeded();
     }),
   );
 
@@ -159,5 +128,5 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() {
   for (const t of pendingUpdateTimers.values()) clearTimeout(t);
   pendingUpdateTimers.clear();
-  glow.dispose();
+  glow.destroy();
 }

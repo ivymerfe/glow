@@ -6,7 +6,7 @@
       "name": "glow",
       "devDependencies": {
         "@types/bun": "latest",
-        "@types/vscode": "latest",
+        "@types/vscode": "^1.105.0",
       },
       "peerDependencies": {
         "typescript": "^5",

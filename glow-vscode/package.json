@@ -16,41 +16,27 @@
   "contributes": {
     "commands": [
       {
-        "command": "glow.togglePreview",
-        "title": "Glow: Toggle Preview"
+        "command": "glow.preview",
+        "title": "Glow: Start preview or toggle fullscreen"
       },
       {
-        "command": "glow.fullscreenWindow",
-        "title": "Glow: Toggle Fullscreen Preview"
+        "command": "glow.stopPreview",
+        "title": "Glow: Stop Preview"
       },
       {
-        "command": "glow.hideOrShowWindow",
-        "title": "Glow: Hide/Show Preview Window"
-      },
-      {
-        "command": "glow.suspendWindow",
-        "title": "Glow: Suspend Preview Window"
+        "command": "glow.restart",
+        "title": "Glow: Restart"
       }
     ],
     "keybindings": [
       {
-        "command": "glow.togglePreview",
-        "key": "alt+r",
+        "command": "glow.preview",
+        "key": "ctrl+e",
         "when": "editorTextFocus && (editorLangId == slang || resourceExtname == .slang || resourceExtname == .slangh)"
       },
       {
-        "command": "glow.fullscreenWindow",
-        "key": "alt+f",
-        "when": "editorTextFocus && (editorLangId == slang || resourceExtname == .slang || resourceExtname == .slangh)"
-      },
-      {
-        "command": "glow.hideOrShowWindow",
-        "key": "alt+v",
-        "when": "editorTextFocus && (editorLangId == slang || resourceExtname == .slang || resourceExtname == .slangh)"
-      },
-      {
-        "command": "glow.suspendWindow",
-        "key": "alt+c",
+        "command": "glow.stopPreview",
+        "key": "ctrl+q",
         "when": "editorTextFocus && (editorLangId == slang || resourceExtname == .slang || resourceExtname == .slangh)"
       }
     ],
@@ -61,14 +47,6 @@
           "type": "string",
           "default": "glow",
           "description": "Path to the glow executable (or command name in PATH)."
-        },
-        "glow.args": {
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "description": "Extra arguments passed to glow."
         }
       }
     }
