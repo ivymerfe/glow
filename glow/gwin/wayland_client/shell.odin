@@ -1,5 +1,5 @@
 #+build linux
-package xdg
+package wayland
 @(private)
 xdg_shell_types := []^interface {
 	nil,
@@ -7,30 +7,30 @@ xdg_shell_types := []^interface {
 	nil,
 	nil,
 	&positioner_interface,
-	&surface_interface,
-	&wl.surface_interface,
+	&xdg_surface_interface,
+	&xdg_surface_interface,
 	&toplevel_interface,
 	&popup_interface,
-	&surface_interface,
+	&xdg_surface_interface,
 	&positioner_interface,
 	&toplevel_interface,
-	&wl.seat_interface,
+	&seat_interface,
 	nil,
 	nil,
 	nil,
-	&wl.seat_interface,
+	&seat_interface,
 	nil,
-	&wl.seat_interface,
+	&seat_interface,
 	nil,
 	nil,
-	&wl.output_interface,
-	&wl.seat_interface,
+	&output_interface,
+	&seat_interface,
 	nil,
 	&positioner_interface,
 	nil,
 }
 /* The xdg_wm_base interface is exposed as a global object enabling clients
-      to turn their wl_surfaces into windows in a desktop environment. It
+      to turn their wl_xdg_surfaces into windows in a desktop environment. It
       defines the basic functionality needed for clients and the compositor to
       create windows that can be dragged, resized, maximized, etc, as well as
       creating transient windows such as popup menus. */
@@ -45,16 +45,16 @@ wm_base_get_user_data :: proc "contextless" (wm_base_: ^wm_base) -> rawptr {
 
 /* Destroy this xdg_wm_base object.
 
-	Destroying a bound xdg_wm_base object while there are surfaces
+	Destroying a bound xdg_wm_base object while there are xdg_surfaces
 	still alive created by this xdg_wm_base object instance is illegal
-	and will result in a defunct_surfaces error. */
+	and will result in a defunct_xdg_surfaces error. */
 WM_BASE_DESTROY :: 0
 wm_base_destroy :: proc "contextless" (wm_base_: ^wm_base) {
 	proxy_marshal_flags(cast(^proxy)wm_base_, WM_BASE_DESTROY, nil, proxy_get_version(cast(^proxy)wm_base_), 1)
 }
 
 /* Create a positioner object. A positioner object is used to position
-	surfaces relative to some parent surface. See the interface description
+	xdg_surfaces relative to some parent xdg_surface. See the interface description
 	and xdg_surface.get_popup for details. */
 WM_BASE_CREATE_POSITIONER :: 1
 wm_base_create_positioner :: proc "contextless" (wm_base_: ^wm_base) -> ^positioner {
@@ -62,23 +62,23 @@ wm_base_create_positioner :: proc "contextless" (wm_base_: ^wm_base) -> ^positio
 	return cast(^positioner)ret
 }
 
-/* This creates an xdg_surface for the given surface. While xdg_surface
-	itself is not a role, the corresponding surface may only be assigned
+/* This creates an xdg_surface for the given xdg_surface. While xdg_surface
+	itself is not a role, the corresponding xdg_surface may only be assigned
 	a role extending xdg_surface, such as xdg_toplevel or xdg_popup. It is
-	illegal to create an xdg_surface for a wl_surface which already has an
+	illegal to create an xdg_surface for a wl_xdg_surface which already has an
 	assigned role and this will result in a role error.
 
-	This creates an xdg_surface for the given surface. An xdg_surface is
-	used as basis to define a role to a given surface, such as xdg_toplevel
+	This creates an xdg_surface for the given xdg_surface. An xdg_surface is
+	used as basis to define a role to a given xdg_surface, such as xdg_toplevel
 	or xdg_popup. It also manages functionality shared between xdg_surface
-	based surface roles.
+	based xdg_surface roles.
 
 	See the documentation of xdg_surface for more details about what an
 	xdg_surface is and how it is used. */
 WM_BASE_GET_XDG_SURFACE :: 2
-wm_base_get_xdg_surface :: proc "contextless" (wm_base_: ^wm_base, surface_: ^wl.surface) -> ^surface {
-	ret := proxy_marshal_flags(cast(^proxy)wm_base_, WM_BASE_GET_XDG_SURFACE, &surface_interface, proxy_get_version(cast(^proxy)wm_base_), 0, nil, surface_)
-	return cast(^surface)ret
+wm_base_get_xdg_surface :: proc "contextless" (wm_base_: ^wm_base, surface_: ^surface) -> ^xdg_surface {
+	ret := proxy_marshal_flags(cast(^proxy)wm_base_, WM_BASE_GET_XDG_SURFACE, &xdg_surface_interface, proxy_get_version(cast(^proxy)wm_base_), 0, nil, surface_)
+	return cast(^xdg_surface)ret
 }
 
 /* A client must respond to a ping event with a pong request or
@@ -112,10 +112,10 @@ wm_base_add_listener :: proc "contextless" (wm_base_: ^wm_base, listener: ^wm_ba
 /*  */
 wm_base_error :: enum {
 	role = 0,
-	defunct_surfaces = 1,
+	defunct_xdg_surfaces = 1,
 	not_the_topmost_popup = 2,
 	invalid_popup_parent = 3,
-	invalid_surface_state = 4,
+	invalid_xdg_surface_state = 4,
 	invalid_positioner = 5,
 	unresponsive = 6,
 }
@@ -135,12 +135,12 @@ wm_base_events := []message {
 wm_base_interface : interface
 
 /* The xdg_positioner provides a collection of rules for the placement of a
-      child surface relative to a parent surface. Rules can be defined to ensure
-      the child surface remains within the visible area's borders, and to
-      specify how the child surface changes its position, such as sliding along
+      child xdg_surface relative to a parent xdg_surface. Rules can be defined to ensure
+      the child xdg_surface remains within the visible area's borders, and to
+      specify how the child xdg_surface changes its position, such as sliding along
       an axis, or flipping around a rectangle. These positioner-created rules are
-      constrained by the requirement that a child surface must intersect with or
-      be at least partially adjacent to its parent surface.
+      constrained by the requirement that a child xdg_surface must intersect with or
+      be at least partially adjacent to its parent xdg_surface.
 
       See the various requests for details about possible rules.
 
@@ -152,7 +152,7 @@ wm_base_interface : interface
       For an xdg_positioner object to be considered complete, it must have a
       non-zero size set by set_size, and a non-zero anchor rectangle set by
       set_anchor_rect. Passing an incomplete xdg_positioner object when
-      positioning a surface raises an invalid_positioner error. */
+      positioning a xdg_surface raises an invalid_positioner error. */
 positioner :: struct {}
 positioner_set_user_data :: proc "contextless" (positioner_: ^positioner, user_data: rawptr) {
    proxy_set_user_data(cast(^proxy)positioner_, user_data)
@@ -168,8 +168,8 @@ positioner_destroy :: proc "contextless" (positioner_: ^positioner) {
 	proxy_marshal_flags(cast(^proxy)positioner_, POSITIONER_DESTROY, nil, proxy_get_version(cast(^proxy)positioner_), 1)
 }
 
-/* Set the size of the surface that is to be positioned with the positioner
-	object. The size is in surface-local coordinates and corresponds to the
+/* Set the size of the xdg_surface that is to be positioned with the positioner
+	object. The size is in xdg_surface-local coordinates and corresponds to the
 	window geometry. See xdg_surface.set_window_geometry.
 
 	If a zero or negative size is set the invalid_input error is raised. */
@@ -178,14 +178,14 @@ positioner_set_size :: proc "contextless" (positioner_: ^positioner, width_: int
 	proxy_marshal_flags(cast(^proxy)positioner_, POSITIONER_SET_SIZE, nil, proxy_get_version(cast(^proxy)positioner_), 0, width_, height_)
 }
 
-/* Specify the anchor rectangle within the parent surface that the child
-	surface will be placed relative to. The rectangle is relative to the
+/* Specify the anchor rectangle within the parent xdg_surface that the child
+	xdg_surface will be placed relative to. The rectangle is relative to the
 	window geometry as defined by xdg_surface.set_window_geometry of the
-	parent surface.
+	parent xdg_surface.
 
-	When the xdg_positioner object is used to position a child surface, the
+	When the xdg_positioner object is used to position a child xdg_surface, the
 	anchor rectangle may not extend outside the window geometry of the
-	positioned child's parent surface.
+	positioned child's parent xdg_surface.
 
 	If a negative size is set the invalid_input error is raised. */
 POSITIONER_SET_ANCHOR_RECT :: 2
@@ -194,7 +194,7 @@ positioner_set_anchor_rect :: proc "contextless" (positioner_: ^positioner, x_: 
 }
 
 /* Defines the anchor point for the anchor rectangle. The specified anchor
-	is used derive an anchor point that the child surface will be
+	is used derive an anchor point that the child xdg_surface will be
 	positioned relative to. If a corner anchor is set (e.g. 'top_left' or
 	'bottom_right'), the anchor point will be at the specified corner;
 	otherwise, the derived anchor point will be centered on the specified
@@ -204,11 +204,11 @@ positioner_set_anchor :: proc "contextless" (positioner_: ^positioner, anchor_: 
 	proxy_marshal_flags(cast(^proxy)positioner_, POSITIONER_SET_ANCHOR, nil, proxy_get_version(cast(^proxy)positioner_), 0, anchor_)
 }
 
-/* Defines in what direction a surface should be positioned, relative to
-	the anchor point of the parent surface. If a corner gravity is
-	specified (e.g. 'bottom_right' or 'top_left'), then the child surface
+/* Defines in what direction a xdg_surface should be positioned, relative to
+	the anchor point of the parent xdg_surface. If a corner gravity is
+	specified (e.g. 'bottom_right' or 'top_left'), then the child xdg_surface
 	will be placed towards the specified gravity; otherwise, the child
-	surface will be centered over the anchor point on any axis that had no
+	xdg_surface will be centered over the anchor point on any axis that had no
 	gravity specified. If the gravity is not in the ‘gravity’ enum, an
 	invalid_input error is raised. */
 POSITIONER_SET_GRAVITY :: 4
@@ -217,13 +217,13 @@ positioner_set_gravity :: proc "contextless" (positioner_: ^positioner, gravity_
 }
 
 /* Specify how the window should be positioned if the originally intended
-	position caused the surface to be constrained, meaning at least
+	position caused the xdg_surface to be constrained, meaning at least
 	partially outside positioning boundaries set by the compositor. The
 	adjustment is set by constructing a bitmask describing the adjustment to
-	be made when the surface is constrained on that axis.
+	be made when the xdg_surface is constrained on that axis.
 
 	If no bit for one axis is set, the compositor will assume that the child
-	surface should not change its position on that axis when constrained.
+	xdg_surface should not change its position on that axis when constrained.
 
 	If more than one bit for one axis is set, the order of how adjustments
 	are applied is specified in the corresponding adjustment descriptions.
@@ -234,23 +234,23 @@ positioner_set_constraint_adjustment :: proc "contextless" (positioner_: ^positi
 	proxy_marshal_flags(cast(^proxy)positioner_, POSITIONER_SET_CONSTRAINT_ADJUSTMENT, nil, proxy_get_version(cast(^proxy)positioner_), 0, constraint_adjustment_)
 }
 
-/* Specify the surface position offset relative to the position of the
-	anchor on the anchor rectangle and the anchor on the surface. For
-	example if the anchor of the anchor rectangle is at (x, y), the surface
+/* Specify the xdg_surface position offset relative to the position of the
+	anchor on the anchor rectangle and the anchor on the xdg_surface. For
+	example if the anchor of the anchor rectangle is at (x, y), the xdg_surface
 	has the gravity bottom|right, and the offset is (ox, oy), the calculated
-	surface position will be (x + ox, y + oy). The offset position of the
-	surface is the one used for constraint testing. See
+	xdg_surface position will be (x + ox, y + oy). The offset position of the
+	xdg_surface is the one used for constraint testing. See
 	set_constraint_adjustment.
 
 	An example use case is placing a popup menu on top of a user interface
-	element, while aligning the user interface element of the parent surface
-	with some user interface element placed somewhere in the popup surface. */
+	element, while aligning the user interface element of the parent xdg_surface
+	with some user interface element placed somewhere in the popup xdg_surface. */
 POSITIONER_SET_OFFSET :: 6
 positioner_set_offset :: proc "contextless" (positioner_: ^positioner, x_: int, y_: int) {
 	proxy_marshal_flags(cast(^proxy)positioner_, POSITIONER_SET_OFFSET, nil, proxy_get_version(cast(^proxy)positioner_), 0, x_, y_)
 }
 
-/* When set reactive, the surface is reconstrained if the conditions used
+/* When set reactive, the xdg_surface is reconstrained if the conditions used
 	for constraining changed, e.g. the parent window moved.
 
 	If the conditions changed and the popup was reconstrained, an
@@ -267,7 +267,7 @@ positioner_set_reactive :: proc "contextless" (positioner_: ^positioner) {
 	this doesn't match the dimension of the parent the popup is eventually
 	positioned against, the behavior is undefined.
 
-	The arguments are given in the surface-local coordinate space. */
+	The arguments are given in the xdg_surface-local coordinate space. */
 POSITIONER_SET_PARENT_SIZE :: 8
 positioner_set_parent_size :: proc "contextless" (positioner_: ^positioner, parent_width_: int, parent_height_: int) {
 	proxy_marshal_flags(cast(^proxy)positioner_, POSITIONER_SET_PARENT_SIZE, nil, proxy_get_version(cast(^proxy)positioner_), 0, parent_width_, parent_height_)
@@ -311,12 +311,12 @@ positioner_gravity :: enum {
 	bottom_right = 8,
 }
 /* The constraint adjustment value define ways the compositor will adjust
-	the position of the surface, if the unadjusted position would result
-	in the surface being partly constrained.
+	the position of the xdg_surface, if the unadjusted position would result
+	in the xdg_surface being partly constrained.
 
-	Whether a surface is considered 'constrained' is left to the compositor
-	to determine. For example, the surface may be partly outside the
-	compositor's defined 'work area', thus necessitating the child surface's
+	Whether a xdg_surface is considered 'constrained' is left to the compositor
+	to determine. For example, the xdg_surface may be partly outside the
+	compositor's defined 'work area', thus necessitating the child xdg_surface's
 	position be adjusted until it is entirely inside the work area.
 
 	The adjustments can be combined, according to a defined precedence: 1)
@@ -346,7 +346,7 @@ positioner_requests := []message {
 
 positioner_interface : interface
 
-/* An interface that may be implemented by a wl_surface, for
+/* An interface that may be implemented by a wl_xdg_surface, for
       implementations that provide a desktop-style user interface.
 
       It provides a base set of functionality required to construct user
@@ -354,19 +354,19 @@ positioner_interface : interface
       toplevel windows, menus, etc. The types of functionality are split into
       xdg_surface roles.
 
-      Creating an xdg_surface does not set the role for a wl_surface. In order
+      Creating an xdg_surface does not set the role for a wl_xdg_surface. In order
       to map an xdg_surface, the client must create a role-specific object
-      using, e.g., get_toplevel, get_popup. The wl_surface for any given
+      using, e.g., get_toplevel, get_popup. The wl_xdg_surface for any given
       xdg_surface can have at most one role, and may not be assigned any role
       not based on xdg_surface.
 
       A role must be assigned before any other requests are made to the
       xdg_surface object.
 
-      The client must call wl_surface.commit on the corresponding wl_surface
+      The client must call wl_xdg_surface.commit on the corresponding wl_xdg_surface
       for the xdg_surface state to take effect.
 
-      Creating an xdg_surface from a wl_surface which has a buffer attached or
+      Creating an xdg_surface from a wl_xdg_surface which has a buffer attached or
       committed is a client error, and any attempts by a client to attach or
       manipulate a buffer prior to the first xdg_surface.configure call must
       also be treated as errors.
@@ -374,117 +374,117 @@ positioner_interface : interface
       After creating a role-specific object and setting it up (e.g. by sending
       the title, app ID, size constraints, parent, etc), the client must
       perform an initial commit without any buffer attached. The compositor
-      will reply with initial wl_surface state such as
-      wl_surface.preferred_buffer_scale followed by an xdg_surface.configure
+      will reply with initial wl_xdg_surface state such as
+      wl_xdg_surface.preferred_buffer_scale followed by an xdg_surface.configure
       event. The client must acknowledge it and is then allowed to attach a
-      buffer to map the surface.
+      buffer to map the xdg_surface.
 
-      Mapping an xdg_surface-based role surface is defined as making it
-      possible for the surface to be shown by the compositor. Note that
-      a mapped surface is not guaranteed to be visible once it is mapped.
+      Mapping an xdg_surface-based role xdg_surface is defined as making it
+      possible for the xdg_surface to be shown by the compositor. Note that
+      a mapped xdg_surface is not guaranteed to be visible once it is mapped.
 
       For an xdg_surface to be mapped by the compositor, the following
       conditions must be met:
-      (1) the client has assigned an xdg_surface-based role to the surface
+      (1) the client has assigned an xdg_surface-based role to the xdg_surface
       (2) the client has set and committed the xdg_surface state and the
-	  role-dependent state to the surface
-      (3) the client has committed a buffer to the surface
+	  role-dependent state to the xdg_surface
+      (3) the client has committed a buffer to the xdg_surface
 
-      A newly-unmapped surface is considered to have met condition (1) out
-      of the 3 required conditions for mapping a surface if its role surface
+      A newly-unmapped xdg_surface is considered to have met condition (1) out
+      of the 3 required conditions for mapping a xdg_surface if its role xdg_surface
       has not been destroyed, i.e. the client must perform the initial commit
       again before attaching a buffer. */
-surface :: struct {}
-surface_set_user_data :: proc "contextless" (surface_: ^surface, user_data: rawptr) {
-   proxy_set_user_data(cast(^proxy)surface_, user_data)
+xdg_surface :: struct {}
+xdg_surface_set_user_data :: proc "contextless" (xdg_surface_: ^xdg_surface, user_data: rawptr) {
+   proxy_set_user_data(cast(^proxy)xdg_surface_, user_data)
 }
 
-surface_get_user_data :: proc "contextless" (surface_: ^surface) -> rawptr {
-   return proxy_get_user_data(cast(^proxy)surface_)
+xdg_surface_get_user_data :: proc "contextless" (xdg_surface_: ^xdg_surface) -> rawptr {
+   return proxy_get_user_data(cast(^proxy)xdg_surface_)
 }
 
 /* Destroy the xdg_surface object. An xdg_surface must only be destroyed
 	after its role object has been destroyed, otherwise
 	a defunct_role_object error is raised. */
-SURFACE_DESTROY :: 0
-surface_destroy :: proc "contextless" (surface_: ^surface) {
-	proxy_marshal_flags(cast(^proxy)surface_, SURFACE_DESTROY, nil, proxy_get_version(cast(^proxy)surface_), 1)
+xdg_SURFACE_DESTROY :: 0
+xdg_surface_destroy :: proc "contextless" (xdg_surface_: ^xdg_surface) {
+	proxy_marshal_flags(cast(^proxy)xdg_surface_, xdg_SURFACE_DESTROY, nil, proxy_get_version(cast(^proxy)xdg_surface_), 1)
 }
 
 /* This creates an xdg_toplevel object for the given xdg_surface and gives
-	the associated wl_surface the xdg_toplevel role.
+	the associated wl_xdg_surface the xdg_toplevel role.
 
 	See the documentation of xdg_toplevel for more details about what an
 	xdg_toplevel is and how it is used. */
-SURFACE_GET_TOPLEVEL :: 1
-surface_get_toplevel :: proc "contextless" (surface_: ^surface) -> ^toplevel {
-	ret := proxy_marshal_flags(cast(^proxy)surface_, SURFACE_GET_TOPLEVEL, &toplevel_interface, proxy_get_version(cast(^proxy)surface_), 0, nil)
+xdg_SURFACE_GET_TOPLEVEL :: 1
+xdg_surface_get_toplevel :: proc "contextless" (xdg_surface_: ^xdg_surface) -> ^toplevel {
+	ret := proxy_marshal_flags(cast(^proxy)xdg_surface_, xdg_SURFACE_GET_TOPLEVEL, &toplevel_interface, proxy_get_version(cast(^proxy)xdg_surface_), 0, nil)
 	return cast(^toplevel)ret
 }
 
 /* This creates an xdg_popup object for the given xdg_surface and gives
-	the associated wl_surface the xdg_popup role.
+	the associated wl_xdg_surface the xdg_popup role.
 
-	If null is passed as a parent, a parent surface must be specified using
+	If null is passed as a parent, a parent xdg_surface must be specified using
 	some other protocol, before committing the initial state.
 
 	See the documentation of xdg_popup for more details about what an
 	xdg_popup is and how it is used. */
-SURFACE_GET_POPUP :: 2
-surface_get_popup :: proc "contextless" (surface_: ^surface, parent_: ^surface, positioner_: ^positioner) -> ^popup {
-	ret := proxy_marshal_flags(cast(^proxy)surface_, SURFACE_GET_POPUP, &popup_interface, proxy_get_version(cast(^proxy)surface_), 0, nil, parent_, positioner_)
+xdg_SURFACE_GET_POPUP :: 2
+xdg_surface_get_popup :: proc "contextless" (xdg_surface_: ^xdg_surface, parent_: ^xdg_surface, positioner_: ^positioner) -> ^popup {
+	ret := proxy_marshal_flags(cast(^proxy)xdg_surface_, xdg_SURFACE_GET_POPUP, &popup_interface, proxy_get_version(cast(^proxy)xdg_surface_), 0, nil, parent_, positioner_)
 	return cast(^popup)ret
 }
 
-/* The window geometry of a surface is its "visible bounds" from the
+/* The window geometry of a xdg_surface is its "visible bounds" from the
 	user's perspective. Client-side decorations often have invisible
 	portions like drop-shadows which should be ignored for the
 	purposes of aligning, placing and constraining windows.
 
-	The window geometry is double-buffered state, see wl_surface.commit.
+	The window geometry is double-buffered state, see wl_xdg_surface.commit.
 
 	When maintaining a position, the compositor should treat the (x, y)
 	coordinate of the window geometry as the top left corner of the window.
 	A client changing the (x, y) window geometry coordinate should in
 	general not alter the position of the window.
 
-	Once the window geometry of the surface is set, it is not possible to
+	Once the window geometry of the xdg_surface is set, it is not possible to
 	unset it, and it will remain the same until set_window_geometry is
-	called again, even if a new subsurface or buffer is attached.
+	called again, even if a new subxdg_surface or buffer is attached.
 
-	If never set, the value is the full bounds of the surface,
-	including any subsurfaces. This updates dynamically on every
+	If never set, the value is the full bounds of the xdg_surface,
+	including any subxdg_surfaces. This updates dynamically on every
 	commit. This unset is meant for extremely simple clients.
 
-	The arguments are given in the surface-local coordinate space of
-	the wl_surface associated with this xdg_surface, and may extend outside
-	of the wl_surface itself to mark parts of the subsurface tree as part of
+	The arguments are given in the xdg_surface-local coordinate space of
+	the wl_xdg_surface associated with this xdg_surface, and may extend outside
+	of the wl_xdg_surface itself to mark parts of the subxdg_surface tree as part of
 	the window geometry.
 
 	When applied, the effective window geometry will be the set window
 	geometry clamped to the bounding rectangle of the combined
-	geometry of the surface of the xdg_surface and the associated
-	subsurfaces.
+	geometry of the xdg_surface of the xdg_surface and the associated
+	subxdg_surfaces.
 
 	The effective geometry will not be recalculated unless a new call to
-	set_window_geometry is done and the new pending surface state is
+	set_window_geometry is done and the new pending xdg_surface state is
 	subsequently applied.
 
 	The width and height of the effective window geometry must be
 	greater than zero. Setting an invalid size will raise an
 	invalid_size error. */
-SURFACE_SET_WINDOW_GEOMETRY :: 3
-surface_set_window_geometry :: proc "contextless" (surface_: ^surface, x_: int, y_: int, width_: int, height_: int) {
-	proxy_marshal_flags(cast(^proxy)surface_, SURFACE_SET_WINDOW_GEOMETRY, nil, proxy_get_version(cast(^proxy)surface_), 0, x_, y_, width_, height_)
+xdg_SURFACE_SET_WINDOW_GEOMETRY :: 3
+xdg_surface_set_window_geometry :: proc "contextless" (xdg_surface_: ^xdg_surface, x_: int, y_: int, width_: int, height_: int) {
+	proxy_marshal_flags(cast(^proxy)xdg_surface_, xdg_SURFACE_SET_WINDOW_GEOMETRY, nil, proxy_get_version(cast(^proxy)xdg_surface_), 0, x_, y_, width_, height_)
 }
 
 /* When a configure event is received, if a client commits the
-	surface in response to the configure event, then the client
+	xdg_surface in response to the configure event, then the client
 	must make an ack_configure request sometime before the commit
 	request, passing along the serial of the configure event.
 
-	For instance, for toplevel surfaces the compositor might use this
-	information to move a surface to the top left only when the client has
+	For instance, for toplevel xdg_surfaces the compositor might use this
+	information to move a xdg_surface to the top left only when the client has
 	drawn itself for the maximized or fullscreen state.
 
 	If the client receives multiple configure events before it
@@ -494,7 +494,7 @@ surface_set_window_geometry :: proc "contextless" (surface_: ^surface, x_: int, 
 
 	A client is not required to commit immediately after sending
 	an ack_configure request - it may even ack_configure several times
-	before its next surface commit.
+	before its next xdg_surface commit.
 
 	A client may send multiple ack_configure requests before committing, but
 	only the last request sent before a commit indicates which configure
@@ -510,36 +510,36 @@ surface_set_window_geometry :: proc "contextless" (surface_: ^surface, x_: int, 
 	request referencing a serial from a configure event issued before the
 	event identified by the last ack_configure request for the same
 	xdg_surface. Doing so will raise an invalid_serial error. */
-SURFACE_ACK_CONFIGURE :: 4
-surface_ack_configure :: proc "contextless" (surface_: ^surface, serial_: uint) {
-	proxy_marshal_flags(cast(^proxy)surface_, SURFACE_ACK_CONFIGURE, nil, proxy_get_version(cast(^proxy)surface_), 0, serial_)
+xdg_SURFACE_ACK_CONFIGURE :: 4
+xdg_surface_ack_configure :: proc "contextless" (xdg_surface_: ^xdg_surface, serial_: uint) {
+	proxy_marshal_flags(cast(^proxy)xdg_surface_, xdg_SURFACE_ACK_CONFIGURE, nil, proxy_get_version(cast(^proxy)xdg_surface_), 0, serial_)
 }
 
-surface_listener :: struct {
+xdg_surface_listener :: struct {
 /* The configure event marks the end of a configure sequence. A configure
 	sequence is a set of one or more events configuring the state of the
 	xdg_surface, including the final xdg_surface.configure event.
 
-	Where applicable, xdg_surface surface roles will during a configure
+	Where applicable, xdg_surface xdg_surface roles will during a configure
 	sequence extend this event as a latched state sent as events before the
 	xdg_surface.configure event. Such events should be considered to make up
 	a set of atomically applied configuration states, where the
 	xdg_surface.configure commits the accumulated state.
 
-	Clients should arrange their surface for the new states, and then send
+	Clients should arrange their xdg_surface for the new states, and then send
 	an ack_configure request with the serial sent in this configure event at
-	some point before committing the new surface.
+	some point before committing the new xdg_surface.
 
 	If the client receives multiple configure events before it can respond
 	to one, it is free to discard all but the last event it received. */
-	configure : proc "c" (data: rawptr, surface: ^surface, serial_: uint),
+	configure : proc "c" (data: rawptr, xdg_surface: ^xdg_surface, serial_: uint),
 
 }
-surface_add_listener :: proc "contextless" (surface_: ^surface, listener: ^surface_listener, data: rawptr) {
-	proxy_add_listener(cast(^proxy)surface_, cast(^generic_c_call)listener,data)
+xdg_surface_add_listener :: proc "contextless" (xdg_surface_: ^xdg_surface, listener: ^xdg_surface_listener, data: rawptr) {
+	proxy_add_listener(cast(^proxy)xdg_surface_, cast(^generic_c_call)listener,data)
 }
 /*  */
-surface_error :: enum {
+xdg_surface_error :: enum {
 	not_constructed = 1,
 	already_constructed = 2,
 	unconfigured_buffer = 3,
@@ -548,7 +548,7 @@ surface_error :: enum {
 	defunct_role_object = 6,
 }
 @(private)
-surface_requests := []message {
+xdg_surface_requests := []message {
 	{"destroy", "", raw_data(xdg_shell_types)[0:]},
 	{"get_toplevel", "n", raw_data(xdg_shell_types)[7:]},
 	{"get_popup", "n?oo", raw_data(xdg_shell_types)[8:]},
@@ -557,13 +557,13 @@ surface_requests := []message {
 }
 
 @(private)
-surface_events := []message {
+xdg_surface_events := []message {
 	{"configure", "u", raw_data(xdg_shell_types)[0:]},
 }
 
-surface_interface : interface
+xdg_surface_interface : interface
 
-/* This interface defines an xdg_surface role which allows a surface to,
+/* This interface defines an xdg_surface role which allows a xdg_surface to,
       among other things, set window-like properties such as maximize,
       fullscreen, and minimize, set application-specific metadata like title and
       id, and well as trigger user interactive operations such as interactive
@@ -573,17 +573,17 @@ surface_interface : interface
       visual representation of the toplevel, which depending on the window
       state, may mean things like a title bar, window controls and drop shadow.
 
-      Unmapping an xdg_toplevel means that the surface cannot be shown
+      Unmapping an xdg_toplevel means that the xdg_surface cannot be shown
       by the compositor until it is explicitly mapped again.
       All active operations (e.g., move, resize) are canceled and all
       attributes (e.g. title, state, stacking, ...) are discarded for
-      an xdg_toplevel surface when it is unmapped. The xdg_toplevel returns to
+      an xdg_toplevel xdg_surface when it is unmapped. The xdg_toplevel returns to
       the state it had right after xdg_surface.get_toplevel. The client
       can re-map the toplevel by performing a commit without any buffer
       attached, waiting for a configure event and handling it as usual (see
       xdg_surface description).
 
-      Attaching a null buffer to a toplevel unmaps the surface. */
+      Attaching a null buffer to a toplevel unmaps the xdg_surface. */
 toplevel :: struct {}
 toplevel_set_user_data :: proc "contextless" (toplevel_: ^toplevel, user_data: rawptr) {
    proxy_set_user_data(cast(^proxy)toplevel_, user_data)
@@ -593,28 +593,28 @@ toplevel_get_user_data :: proc "contextless" (toplevel_: ^toplevel) -> rawptr {
    return proxy_get_user_data(cast(^proxy)toplevel_)
 }
 
-/* This request destroys the role surface and unmaps the surface;
+/* This request destroys the role xdg_surface and unmaps the xdg_surface;
 	see "Unmapping" behavior in interface section for details. */
 TOPLEVEL_DESTROY :: 0
 toplevel_destroy :: proc "contextless" (toplevel_: ^toplevel) {
 	proxy_marshal_flags(cast(^proxy)toplevel_, TOPLEVEL_DESTROY, nil, proxy_get_version(cast(^proxy)toplevel_), 1)
 }
 
-/* Set the "parent" of this surface. This surface should be stacked
-	above the parent surface and all other ancestor surfaces.
+/* Set the "parent" of this xdg_surface. This xdg_surface should be stacked
+	above the parent xdg_surface and all other ancestor xdg_surfaces.
 
-	Parent surfaces should be set on dialogs, toolboxes, or other
-	"auxiliary" surfaces, so that the parent is raised when the dialog
+	Parent xdg_surfaces should be set on dialogs, toolboxes, or other
+	"auxiliary" xdg_surfaces, so that the parent is raised when the dialog
 	is raised.
 
-	Setting a null parent for a child surface unsets its parent. Setting
-	a null parent for a surface which currently has no parent is a no-op.
+	Setting a null parent for a child xdg_surface unsets its parent. Setting
+	a null parent for a xdg_surface which currently has no parent is a no-op.
 
-	Only mapped surfaces can have child surfaces. Setting a parent which
-	is not mapped is equivalent to setting a null parent. If a surface
+	Only mapped xdg_surfaces can have child xdg_surfaces. Setting a parent which
+	is not mapped is equivalent to setting a null parent. If a xdg_surface
 	becomes unmapped, its children's parent is set to the parent of
-	the now-unmapped surface. If the now-unmapped surface has no parent,
-	its children's parent is unset. If the now-unmapped surface becomes
+	the now-unmapped xdg_surface. If the now-unmapped xdg_surface has no parent,
+	its children's parent is unset. If the now-unmapped xdg_surface becomes
 	mapped again, its parent-child relationship is not restored.
 
 	The parent toplevel must not be one of the child toplevel's
@@ -625,9 +625,9 @@ toplevel_set_parent :: proc "contextless" (toplevel_: ^toplevel, parent_: ^tople
 	proxy_marshal_flags(cast(^proxy)toplevel_, TOPLEVEL_SET_PARENT, nil, proxy_get_version(cast(^proxy)toplevel_), 0, parent_)
 }
 
-/* Set a short title for the surface.
+/* Set a short title for the xdg_surface.
 
-	This string may be used to identify the surface in a task bar,
+	This string may be used to identify the xdg_surface in a task bar,
 	window list, or other user interface elements provided by the
 	compositor.
 
@@ -637,16 +637,16 @@ toplevel_set_title :: proc "contextless" (toplevel_: ^toplevel, title_: cstring)
 	proxy_marshal_flags(cast(^proxy)toplevel_, TOPLEVEL_SET_TITLE, nil, proxy_get_version(cast(^proxy)toplevel_), 0, title_)
 }
 
-/* Set an application identifier for the surface.
+/* Set an application identifier for the xdg_surface.
 
 	The app ID identifies the general class of applications to which
-	the surface belongs. The compositor can use this to group multiple
-	surfaces together, or to determine how to launch a new application.
+	the xdg_surface belongs. The compositor can use this to group multiple
+	xdg_surfaces together, or to determine how to launch a new application.
 
 	For D-Bus activatable applications, the app ID is used as the D-Bus
 	service name.
 
-	The compositor shell will try to group application surfaces together
+	The compositor shell will try to group application xdg_surfaces together
 	by their app ID. As a best practice, it is suggested to select app
 	ID's that match the basename of the application's .desktop file.
 	For example, "org.freedesktop.FooViewer" where the .desktop file is
@@ -670,19 +670,19 @@ toplevel_set_app_id :: proc "contextless" (toplevel_: ^toplevel, app_id_: cstrin
 	user a menu that they can use to maximize or minimize the window.
 
 	This request asks the compositor to pop up such a window menu at
-	the given position, relative to the local surface coordinates of
-	the parent surface. There are no guarantees as to what menu items
+	the given position, relative to the local xdg_surface coordinates of
+	the parent xdg_surface. There are no guarantees as to what menu items
 	the window menu contains, or even if a window menu will be drawn
 	at all.
 
 	This request must be used in response to some sort of user action
 	like a button press, key press, or touch down event. */
 TOPLEVEL_SHOW_WINDOW_MENU :: 4
-toplevel_show_window_menu :: proc "contextless" (toplevel_: ^toplevel, seat_: ^wl.seat, serial_: uint, x_: int, y_: int) {
+toplevel_show_window_menu :: proc "contextless" (toplevel_: ^toplevel, seat_: ^seat, serial_: uint, x_: int, y_: int) {
 	proxy_marshal_flags(cast(^proxy)toplevel_, TOPLEVEL_SHOW_WINDOW_MENU, nil, proxy_get_version(cast(^proxy)toplevel_), 0, seat_, serial_, x_, y_)
 }
 
-/* Start an interactive, user-driven move of the surface.
+/* Start an interactive, user-driven move of the xdg_surface.
 
 	This request must be used in response to some sort of user action
 	like a button press, key press, or touch down event. The passed
@@ -690,20 +690,20 @@ toplevel_show_window_menu :: proc "contextless" (toplevel_: ^toplevel, seat_: ^w
 	pointer, etc).
 
 	The server may ignore move requests depending on the state of
-	the surface (e.g. fullscreen or maximized), or if the passed serial
+	the xdg_surface (e.g. fullscreen or maximized), or if the passed serial
 	is no longer valid.
 
-	If triggered, the surface will lose the focus of the device
+	If triggered, the xdg_surface will lose the focus of the device
 	(wl_pointer, wl_touch, etc) used for the move. It is up to the
 	compositor to visually indicate that the move is taking place, such as
 	updating a pointer cursor, during the move. There is no guarantee
 	that the device focus will return when the move is completed. */
 TOPLEVEL_MOVE :: 5
-toplevel_move :: proc "contextless" (toplevel_: ^toplevel, seat_: ^wl.seat, serial_: uint) {
+toplevel_move :: proc "contextless" (toplevel_: ^toplevel, seat_: ^seat, serial_: uint) {
 	proxy_marshal_flags(cast(^proxy)toplevel_, TOPLEVEL_MOVE, nil, proxy_get_version(cast(^proxy)toplevel_), 0, seat_, serial_)
 }
 
-/* Start a user-driven, interactive resize of the surface.
+/* Start a user-driven, interactive resize of the xdg_surface.
 
 	This request must be used in response to some sort of user action
 	like a button press, key press, or touch down event. The passed
@@ -711,7 +711,7 @@ toplevel_move :: proc "contextless" (toplevel_: ^toplevel, seat_: ^wl.seat, seri
 	pointer, etc).
 
 	The server may ignore resize requests depending on the state of
-	the surface (e.g. fullscreen or maximized).
+	the xdg_surface (e.g. fullscreen or maximized).
 
 	If triggered, the client will receive configure events with the
 	"resize" state enum value and the expected sizes. See the "resize"
@@ -720,22 +720,22 @@ toplevel_move :: proc "contextless" (toplevel_: ^toplevel, seat_: ^wl.seat, seri
 	the resize is completed, the client will receive another "configure"
 	event without the resize state.
 
-	If triggered, the surface also will lose the focus of the device
+	If triggered, the xdg_surface also will lose the focus of the device
 	(wl_pointer, wl_touch, etc) used for the resize. It is up to the
 	compositor to visually indicate that the resize is taking place,
 	such as updating a pointer cursor, during the resize. There is no
 	guarantee that the device focus will return when the resize is
 	completed.
 
-	The edges parameter specifies how the surface should be resized, and
+	The edges parameter specifies how the xdg_surface should be resized, and
 	is one of the values of the resize_edge enum. Values not matching
 	a variant of the enum will cause the invalid_resize_edge protocol error.
-	The compositor may use this information to update the surface position
+	The compositor may use this information to update the xdg_surface position
 	for example when dragging the top left corner. The compositor may also
 	use this information to adapt its behavior, e.g. choose an appropriate
 	cursor image. */
 TOPLEVEL_RESIZE :: 6
-toplevel_resize :: proc "contextless" (toplevel_: ^toplevel, seat_: ^wl.seat, serial_: uint, edges_: toplevel_resize_edge) {
+toplevel_resize :: proc "contextless" (toplevel_: ^toplevel, seat_: ^seat, serial_: uint, edges_: toplevel_resize_edge) {
 	proxy_marshal_flags(cast(^proxy)toplevel_, TOPLEVEL_RESIZE, nil, proxy_get_version(cast(^proxy)toplevel_), 0, seat_, serial_, edges_)
 }
 
@@ -747,7 +747,7 @@ toplevel_resize :: proc "contextless" (toplevel_: ^toplevel, seat_: ^wl.seat, se
 	The width and height arguments are in window geometry coordinates.
 	See xdg_surface.set_window_geometry.
 
-	Values set in this way are double-buffered, see wl_surface.commit.
+	Values set in this way are double-buffered, see wl_xdg_surface.commit.
 
 	The compositor can use this information to allow or disallow
 	different states like maximize or fullscreen and draw accurate
@@ -767,7 +767,7 @@ toplevel_resize :: proc "contextless" (toplevel_: ^toplevel, seat_: ^wl.seat, se
 	request.
 
 	Requesting a maximum size to be smaller than the minimum size of
-	a surface is illegal and will result in an invalid_size error.
+	a xdg_surface is illegal and will result in an invalid_size error.
 
 	The width and height must be greater than or equal to zero. Using
 	strictly negative values for width or height will result in a
@@ -785,7 +785,7 @@ toplevel_set_max_size :: proc "contextless" (toplevel_: ^toplevel, width_: int, 
 	The width and height arguments are in window geometry coordinates.
 	See xdg_surface.set_window_geometry.
 
-	Values set in this way are double-buffered, see wl_surface.commit.
+	Values set in this way are double-buffered, see wl_xdg_surface.commit.
 
 	The compositor can use this information to allow or disallow
 	different states like maximize or fullscreen and draw accurate
@@ -805,7 +805,7 @@ toplevel_set_max_size :: proc "contextless" (toplevel_: ^toplevel, width_: int, 
 	request.
 
 	Requesting a minimum size to be larger than the maximum size of
-	a surface is illegal and will result in an invalid_size error.
+	a xdg_surface is illegal and will result in an invalid_size error.
 
 	The width and height must be greater than or equal to zero. Using
 	strictly negative values for width and height will result in a
@@ -815,9 +815,9 @@ toplevel_set_min_size :: proc "contextless" (toplevel_: ^toplevel, width_: int, 
 	proxy_marshal_flags(cast(^proxy)toplevel_, TOPLEVEL_SET_MIN_SIZE, nil, proxy_get_version(cast(^proxy)toplevel_), 0, width_, height_)
 }
 
-/* Maximize the surface.
+/* Maximize the xdg_surface.
 
-	After requesting that the surface should be maximized, the compositor
+	After requesting that the xdg_surface should be maximized, the compositor
 	will respond by emitting a configure event. Whether this configure
 	actually sets the window maximized is subject to compositor policies.
 	The client must then update its content, drawing in the configured
@@ -825,23 +825,23 @@ toplevel_set_min_size :: proc "contextless" (toplevel_: ^toplevel, width_: int, 
 	the new content (see ack_configure).
 
 	It is up to the compositor to decide how and where to maximize the
-	surface, for example which output and what region of the screen should
+	xdg_surface, for example which output and what region of the screen should
 	be used.
 
-	If the surface was already maximized, the compositor will still emit
+	If the xdg_surface was already maximized, the compositor will still emit
 	a configure event with the "maximized" state.
 
-	If the surface is in a fullscreen state, this request has no direct
-	effect. It may alter the state the surface is returned to when
+	If the xdg_surface is in a fullscreen state, this request has no direct
+	effect. It may alter the state the xdg_surface is returned to when
 	unmaximized unless overridden by the compositor. */
 TOPLEVEL_SET_MAXIMIZED :: 9
 toplevel_set_maximized :: proc "contextless" (toplevel_: ^toplevel) {
 	proxy_marshal_flags(cast(^proxy)toplevel_, TOPLEVEL_SET_MAXIMIZED, nil, proxy_get_version(cast(^proxy)toplevel_), 0)
 }
 
-/* Unmaximize the surface.
+/* Unmaximize the xdg_surface.
 
-	After requesting that the surface should be unmaximized, the compositor
+	After requesting that the xdg_surface should be unmaximized, the compositor
 	will respond by emitting a configure event. Whether this actually
 	un-maximizes the window is subject to compositor policies.
 	If available and applicable, the compositor will include the window
@@ -850,24 +850,24 @@ toplevel_set_maximized :: proc "contextless" (toplevel_: ^toplevel) {
 	the configured state. The client must also acknowledge the configure
 	when committing the new content (see ack_configure).
 
-	It is up to the compositor to position the surface after it was
-	unmaximized; usually the position the surface had before maximizing, if
+	It is up to the compositor to position the xdg_surface after it was
+	unmaximized; usually the position the xdg_surface had before maximizing, if
 	applicable.
 
-	If the surface was already not maximized, the compositor will still
+	If the xdg_surface was already not maximized, the compositor will still
 	emit a configure event without the "maximized" state.
 
-	If the surface is in a fullscreen state, this request has no direct
-	effect. It may alter the state the surface is returned to when
+	If the xdg_surface is in a fullscreen state, this request has no direct
+	effect. It may alter the state the xdg_surface is returned to when
 	unmaximized unless overridden by the compositor. */
 TOPLEVEL_UNSET_MAXIMIZED :: 10
 toplevel_unset_maximized :: proc "contextless" (toplevel_: ^toplevel) {
 	proxy_marshal_flags(cast(^proxy)toplevel_, TOPLEVEL_UNSET_MAXIMIZED, nil, proxy_get_version(cast(^proxy)toplevel_), 0)
 }
 
-/* Make the surface fullscreen.
+/* Make the xdg_surface fullscreen.
 
-	After requesting that the surface should be fullscreened, the
+	After requesting that the xdg_surface should be fullscreened, the
 	compositor will respond by emitting a configure event. Whether the
 	client is actually put into a fullscreen state is subject to compositor
 	policies. The client must also acknowledge the configure when
@@ -876,34 +876,34 @@ toplevel_unset_maximized :: proc "contextless" (toplevel_: ^toplevel) {
 	The output passed by the request indicates the client's preference as
 	to which display it should be set fullscreen on. If this value is NULL,
 	it's up to the compositor to choose which display will be used to map
-	this surface.
+	this xdg_surface.
 
-	If the surface doesn't cover the whole output, the compositor will
-	position the surface in the center of the output and compensate with
+	If the xdg_surface doesn't cover the whole output, the compositor will
+	position the xdg_surface in the center of the output and compensate with
 	with border fill covering the rest of the output. The content of the
 	border fill is undefined, but should be assumed to be in some way that
 	attempts to blend into the surrounding area (e.g. solid black).
 
-	If the fullscreened surface is not opaque, the compositor must make
-	sure that other screen content not part of the same surface tree (made
-	up of subsurfaces, popups or similarly coupled surfaces) are not
-	visible below the fullscreened surface. */
+	If the fullscreened xdg_surface is not opaque, the compositor must make
+	sure that other screen content not part of the same xdg_surface tree (made
+	up of subxdg_surfaces, popups or similarly coupled xdg_surfaces) are not
+	visible below the fullscreened xdg_surface. */
 TOPLEVEL_SET_FULLSCREEN :: 11
-toplevel_set_fullscreen :: proc "contextless" (toplevel_: ^toplevel, output_: ^wl.output) {
+toplevel_set_fullscreen :: proc "contextless" (toplevel_: ^toplevel, output_: ^output) {
 	proxy_marshal_flags(cast(^proxy)toplevel_, TOPLEVEL_SET_FULLSCREEN, nil, proxy_get_version(cast(^proxy)toplevel_), 0, output_)
 }
 
-/* Make the surface no longer fullscreen.
+/* Make the xdg_surface no longer fullscreen.
 
-	After requesting that the surface should be unfullscreened, the
+	After requesting that the xdg_surface should be unfullscreened, the
 	compositor will respond by emitting a configure event.
 	Whether this actually removes the fullscreen state of the client is
 	subject to compositor policies.
 
-	Making a surface unfullscreen sets states for the surface based on the following:
+	Making a xdg_surface unfullscreen sets states for the xdg_surface based on the following:
 	* the state(s) it may have had before becoming fullscreen
 	* any state(s) decided by the compositor
-	* any state(s) requested by the client while the surface was fullscreen
+	* any state(s) requested by the client while the xdg_surface was fullscreen
 
 	The compositor may include the previous window geometry dimensions in
 	the configure event, if applicable.
@@ -915,12 +915,12 @@ toplevel_unset_fullscreen :: proc "contextless" (toplevel_: ^toplevel) {
 	proxy_marshal_flags(cast(^proxy)toplevel_, TOPLEVEL_UNSET_FULLSCREEN, nil, proxy_get_version(cast(^proxy)toplevel_), 0)
 }
 
-/* Request that the compositor minimize your surface. There is no
-	way to know if the surface is currently minimized, nor is there
-	any way to unset minimization on this surface.
+/* Request that the compositor minimize your xdg_surface. There is no
+	way to know if the xdg_surface is currently minimized, nor is there
+	any way to unset minimization on this xdg_surface.
 
 	If you are looking to throttle redrawing when minimized, please
-	instead use the wl_surface.frame event for this, as this will
+	instead use the wl_xdg_surface.frame event for this, as this will
 	also work with live previews on windows in Alt-Tab, Expose or
 	similar compositor features. */
 TOPLEVEL_SET_MINIMIZED :: 13
@@ -929,17 +929,17 @@ toplevel_set_minimized :: proc "contextless" (toplevel_: ^toplevel) {
 }
 
 toplevel_listener :: struct {
-/* This configure event asks the client to resize its toplevel surface or
+/* This configure event asks the client to resize its toplevel xdg_surface or
 	to change its state. The configured state should not be applied
 	immediately. See xdg_surface.configure for details.
 
 	The width and height arguments specify a hint to the window
-	about how its surface should be resized in window geometry
+	about how its xdg_surface should be resized in window geometry
 	coordinates. See set_window_geometry.
 
 	If the width or height arguments are zero, it means the client
 	should decide its own window dimension. This may happen when the
-	compositor needs to configure the state of the surface but doesn't
+	compositor needs to configure the state of the xdg_surface but doesn't
 	have any information about any previous or expected dimension.
 
 	The states listed in the event specify how the width/height
@@ -951,7 +951,7 @@ toplevel_listener :: struct {
 	configure : proc "c" (data: rawptr, toplevel: ^toplevel, width_: int, height_: int, states_: ^array),
 
 /* The close event is sent by the compositor when the user
-	wants the surface to be closed. This should be equivalent to
+	wants the xdg_surface to be closed. This should be equivalent to
 	the user clicking the close button in client-side decorations,
 	if your application has any.
 
@@ -964,12 +964,12 @@ toplevel_listener :: struct {
 	event to communicate the bounds a window geometry size is recommended
 	to constrain to.
 
-	The passed width and height are in surface coordinate space. If width
+	The passed width and height are in xdg_surface coordinate space. If width
 	and height are 0, it means bounds is unknown and equivalent to as if no
-	configure_bounds event was ever sent for this surface.
+	configure_bounds event was ever sent for this xdg_surface.
 
 	The bounds can for example correspond to the size of a monitor excluding
-	any panels or other shell components, so that a surface isn't created in
+	any panels or other shell components, so that a xdg_surface isn't created in
 	a way that it cannot fit.
 
 	The bounds may change at any point, and in such a case, a new
@@ -1009,7 +1009,7 @@ toplevel_error :: enum {
 	invalid_parent = 1,
 	invalid_size = 2,
 }
-/* These values are used to indicate which edge of a surface
+/* These values are used to indicate which edge of a xdg_surface
 	is being dragged in a resize operation. */
 toplevel_resize_edge :: enum {
 	none = 0,
@@ -1022,12 +1022,12 @@ toplevel_resize_edge :: enum {
 	top_right = 9,
 	bottom_right = 10,
 }
-/* The different state values used on the surface. This is designed for
+/* The different state values used on the xdg_surface. This is designed for
 	state values like maximized, fullscreen. It is paired with the
 	configure event to ensure that both the client and the compositor
 	setting the state can be synchronized.
 
-	States set in this way are double-buffered, see wl_surface.commit. */
+	States set in this way are double-buffered, see wl_xdg_surface.commit. */
 toplevel_state :: enum {
 	maximized = 1,
 	fullscreen = 2,
@@ -1078,7 +1078,7 @@ toplevel_events := []message {
 
 toplevel_interface : interface
 
-/* A popup surface is a short-lived, temporary surface. It can be used to
+/* A popup xdg_surface is a short-lived, temporary xdg_surface. It can be used to
       implement for example menus, popovers, tooltips and other similar user
       interface concepts.
 
@@ -1086,21 +1086,21 @@ toplevel_interface : interface
       details.
 
       When the popup is dismissed, a popup_done event will be sent out, and at
-      the same time the surface will be unmapped. See the xdg_popup.popup_done
+      the same time the xdg_surface will be unmapped. See the xdg_popup.popup_done
       event for details.
 
       Explicitly destroying the xdg_popup object will also dismiss the popup and
-      unmap the surface. Clients that want to dismiss the popup when another
-      surface of their own is clicked should dismiss the popup using the destroy
+      unmap the xdg_surface. Clients that want to dismiss the popup when another
+      xdg_surface of their own is clicked should dismiss the popup using the destroy
       request.
 
       A newly created xdg_popup will be stacked on top of all previously created
-      xdg_popup surfaces associated with the same xdg_toplevel.
+      xdg_popup xdg_surfaces associated with the same xdg_toplevel.
 
       The parent of an xdg_popup must be mapped (see the xdg_surface
       description) before the xdg_popup itself.
 
-      The client must call wl_surface.commit on the corresponding wl_surface
+      The client must call wl_xdg_surface.commit on the corresponding wl_xdg_surface
       for the xdg_popup state to take effect. */
 popup :: struct {}
 popup_set_user_data :: proc "contextless" (popup_: ^popup, user_data: rawptr) {
@@ -1112,7 +1112,7 @@ popup_get_user_data :: proc "contextless" (popup_: ^popup) -> rawptr {
 }
 
 /* This destroys the popup. Explicitly destroying the xdg_popup
-	object will also dismiss the popup, and unmap the surface.
+	object will also dismiss the popup, and unmap the xdg_surface.
 
 	If this xdg_popup is not the "topmost" popup, the
 	xdg_wm_base.not_the_topmost_popup protocol error will be sent. */
@@ -1124,7 +1124,7 @@ popup_destroy :: proc "contextless" (popup_: ^popup) {
 /* This request makes the created popup take an explicit grab. An explicit
 	grab will be dismissed when the user dismisses the popup, or when the
 	client destroys the xdg_popup. This can be done by the user clicking
-	outside the surface, using the keyboard, or even locking the screen
+	outside the xdg_surface, using the keyboard, or even locking the screen
 	through closing the lid or a timeout.
 
 	If the compositor denies the grab, the popup will be immediately
@@ -1134,7 +1134,7 @@ popup_destroy :: proc "contextless" (popup_: ^popup) {
 	button press, key press, or touch down event. The serial number of the
 	event should be passed as 'serial'.
 
-	The parent of a grabbing popup must either be an xdg_toplevel surface or
+	The parent of a grabbing popup must either be an xdg_toplevel xdg_surface or
 	another xdg_popup with an explicit grab. If the parent is another
 	xdg_popup it means that the popups are nested, with this popup now being
 	the topmost popup.
@@ -1155,11 +1155,11 @@ popup_destroy :: proc "contextless" (popup_: ^popup) {
 	not take an explicit grab, an error will be raised.
 
 	During a popup grab, the client owning the grab will receive pointer
-	and touch events for all their surfaces as normal (similar to an
+	and touch events for all their xdg_surfaces as normal (similar to an
 	"owner-events" grab in X11 parlance), while the top most grabbing popup
 	will always have keyboard focus. */
 POPUP_GRAB :: 1
-popup_grab :: proc "contextless" (popup_: ^popup, seat_: ^wl.seat, serial_: uint) {
+popup_grab :: proc "contextless" (popup_: ^popup, seat_: ^seat, serial_: uint) {
 	proxy_marshal_flags(cast(^proxy)popup_, POPUP_GRAB, nil, proxy_get_version(cast(^proxy)popup_), 0, seat_, serial_)
 }
 
@@ -1192,13 +1192,13 @@ popup_reposition :: proc "contextless" (popup_: ^popup, positioner_: ^positioner
 }
 
 popup_listener :: struct {
-/* This event asks the popup surface to configure itself given the
+/* This event asks the popup xdg_surface to configure itself given the
 	configuration. The configured state should not be applied immediately.
 	See xdg_surface.configure for details.
 
 	The x and y arguments represent the position the popup was placed at
 	given the xdg_positioner rule, relative to the upper left corner of the
-	window geometry of the parent surface.
+	window geometry of the parent xdg_surface.
 
 	For version 2 or older, the configure event for an xdg_popup is only
 	ever sent once for the initial configuration. Starting with version 3,
@@ -1266,12 +1266,12 @@ init_interfaces_xdg_shell :: proc "contextless" () {
 	positioner_interface.method_count = 10
 	positioner_interface.event_count = 0
 	positioner_interface.methods = raw_data(positioner_requests)
-	surface_interface.name = "xdg_surface"
-	surface_interface.version = 7
-	surface_interface.method_count = 5
-	surface_interface.event_count = 1
-	surface_interface.methods = raw_data(surface_requests)
-	surface_interface.events = raw_data(surface_events)
+	xdg_surface_interface.name = "xdg_surface"
+	xdg_surface_interface.version = 7
+	xdg_surface_interface.method_count = 5
+	xdg_surface_interface.event_count = 1
+	xdg_surface_interface.methods = raw_data(xdg_surface_requests)
+	xdg_surface_interface.events = raw_data(xdg_surface_events)
 	toplevel_interface.name = "xdg_toplevel"
 	toplevel_interface.version = 7
 	toplevel_interface.method_count = 14
@@ -1285,21 +1285,3 @@ init_interfaces_xdg_shell :: proc "contextless" () {
 	popup_interface.methods = raw_data(popup_requests)
 	popup_interface.events = raw_data(popup_events)
 }
-
-// Functions from libwayland-client
-import wl ".."
-fixed_t :: wl.fixed_t
-proxy :: wl.proxy
-message :: wl.message
-interface :: wl.interface
-array :: wl.array
-generic_c_call :: wl.generic_c_call
-proxy_add_listener :: wl.proxy_add_listener
-proxy_get_listener :: wl.proxy_get_listener
-proxy_get_user_data :: wl.proxy_get_user_data
-proxy_set_user_data :: wl.proxy_set_user_data
-proxy_get_version :: wl.proxy_get_version
-proxy_marshal :: wl.proxy_marshal
-proxy_marshal_flags :: wl.proxy_marshal_flags
-proxy_marshal_constructor :: wl.proxy_marshal_constructor
-proxy_destroy :: wl.proxy_destroy

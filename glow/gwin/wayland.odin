@@ -8,7 +8,6 @@ import "core:sys/linux"
 
 import vk "vendor:vulkan"
 import wl "wayland_client"
-import xdg "wayland_client/xdg"
 import xkb "xkbcommon"
 
 ModifierState :: struct {
@@ -49,7 +48,7 @@ WaylandContext :: struct {
 	display:                  ^wl.display,
 	registry:                 ^wl.registry,
 	compositor:               ^wl.compositor,
-	wm_base:                  ^xdg.wm_base,
+	wm_base:                  ^wl.wm_base,
 	seat:                     ^wl.seat,
 	keyboard:                 ^wl.keyboard,
 	pointer:                  ^wl.pointer,
@@ -65,8 +64,8 @@ WaylandWindow :: struct {
 	ctx:              ^WaylandContext,
 	id:               u32,
 	surface:          ^wl.surface,
-	xdg_surface:      ^xdg.surface,
-	toplevel:         ^xdg.toplevel,
+	xdg_surface:      ^wl.xdg_surface,
+	toplevel:         ^wl.toplevel,
 	viewport:         ^wl.viewport,
 	fractional_scale: ^wl.fractional_scale_v1,
 	title:            cstring,
@@ -87,18 +86,18 @@ registry_listener := wl.registry_listener {
 }
 
 @(private = "file")
-wm_base_listener := xdg.wm_base_listener {
+wm_base_listener := wl.wm_base_listener {
 	ping = wm_base_ping,
 }
 
 @(private = "file")
-toplevel_listener := xdg.toplevel_listener {
+toplevel_listener := wl.toplevel_listener {
 	configure = xdg_toplevel_configure,
 	close     = xdg_toplevel_close,
 }
 
 @(private = "file")
-xdg_surface_listener := xdg.surface_listener {
+xdg_surface_listener := wl.xdg_surface_listener {
 	configure = xdg_surface_configure,
 }
 
@@ -153,8 +152,8 @@ registry_global :: proc "c" (
 			&wl.compositor_interface,
 			4,
 		)
-	} else if interface == xdg.wm_base_interface.name {
-		ctx.wm_base = cast(^xdg.wm_base)wl.registry_bind(registry, name, &xdg.wm_base_interface, 1)
+	} else if interface == wl.wm_base_interface.name {
+		ctx.wm_base = cast(^wl.wm_base)wl.registry_bind(registry, name, &wl.wm_base_interface, 1)
 	} else if interface == wl.seat_interface.name {
 		ctx.seat = cast(^wl.seat)wl.registry_bind(registry, name, &wl.seat_interface, 5)
 		wl.seat_add_listener(ctx.seat, &seat_listener, data)
@@ -179,13 +178,13 @@ registry_global :: proc "c" (
 registry_global_remove :: proc "c" (data: rawptr, registry: ^wl.registry, name: uint) {}
 
 @(private = "file")
-wm_base_ping :: proc "c" (data: rawptr, wm: ^xdg.wm_base, serial: uint) {
-	xdg.wm_base_pong(wm, serial)
+wm_base_ping :: proc "c" (data: rawptr, wm: ^wl.wm_base, serial: uint) {
+	wl.wm_base_pong(wm, serial)
 }
 
 @(private = "file")
-xdg_surface_configure :: proc "c" (data: rawptr, surface: ^xdg.surface, serial: uint) {
-	xdg.surface_ack_configure(surface, serial)
+xdg_surface_configure :: proc "c" (data: rawptr, surface: ^wl.xdg_surface, serial: uint) {
+	wl.xdg_surface_ack_configure(surface, serial)
 	win := cast(^WaylandWindow)data
 	if win != nil {
 		context = win.ctx.app_context
@@ -196,7 +195,7 @@ xdg_surface_configure :: proc "c" (data: rawptr, surface: ^xdg.surface, serial: 
 @(private = "file")
 xdg_toplevel_configure :: proc "c" (
 	data: rawptr,
-	toplevel: ^xdg.toplevel,
+	toplevel: ^wl.toplevel,
 	width: int,
 	height: int,
 	states: ^wl.array,
@@ -217,7 +216,7 @@ xdg_toplevel_configure :: proc "c" (
 	win.fullscreen = false
 	state_bytes := cast([^]u8)states.data
 	for i: i64 = 0; i < states.size; i += 1 {
-		state := xdg.toplevel_state(state_bytes[i])
+		state := wl.toplevel_state(state_bytes[i])
 		if state == .fullscreen {
 			win.fullscreen = true
 		}
@@ -225,7 +224,7 @@ xdg_toplevel_configure :: proc "c" (
 }
 
 @(private = "file")
-xdg_toplevel_close :: proc "c" (data: rawptr, toplevel: ^xdg.toplevel) {
+xdg_toplevel_close :: proc "c" (data: rawptr, toplevel: ^wl.toplevel) {
 	win := cast(^WaylandWindow)data
 	if win == nil {
 		return
@@ -477,7 +476,7 @@ create_wayland_context :: proc(ctx: ^WaylandContext, event_handler: WindowEventH
 		log.error("Failed to bind required Wayland interfaces")
 		return false
 	}
-	xdg.wm_base_add_listener(ctx.wm_base, &wm_base_listener, ctx)
+	wl.wm_base_add_listener(ctx.wm_base, &wm_base_listener, ctx)
 
 	ctx.kb_context = xkb.keyboard_context_create()
 	ctx.surface_to_window = make(map[^wl.surface]^WaylandWindow)
@@ -504,7 +503,7 @@ destroy_wayland_context :: proc(ctx: ^WaylandContext) {
 		wl.viewporter_destroy(ctx.viewporter)
 	}
 	if ctx.wm_base != nil {
-		xdg.wm_base_destroy(ctx.wm_base)
+		wl.wm_base_destroy(ctx.wm_base)
 	}
 	if ctx.compositor != nil {
 		wl.compositor_destroy(ctx.compositor)
@@ -567,29 +566,29 @@ show_window :: proc(win: ^WaylandWindow) {
 	}
 	win.configured = false
 
-	xdg_surface := xdg.wm_base_get_xdg_surface(win.ctx.wm_base, win.surface)
+	xdg_surface := wl.wm_base_get_xdg_surface(win.ctx.wm_base, win.surface)
 	if xdg_surface == nil {
 		log.error("Failed to create XDG surface")
 		wl.surface_destroy(win.surface)
 		return
 	}
 
-	toplevel := xdg.surface_get_toplevel(xdg_surface)
+	toplevel := wl.xdg_surface_get_toplevel(xdg_surface)
 	if toplevel == nil {
 		log.error("Failed to create XDG toplevel")
-		xdg.surface_destroy(xdg_surface)
+		wl.xdg_surface_destroy(xdg_surface)
 		wl.surface_destroy(win.surface)
 		return
 	}
 	win.xdg_surface = xdg_surface
 	win.toplevel = toplevel
 
-	xdg.surface_add_listener(xdg_surface, &xdg_surface_listener, win)
-	xdg.toplevel_add_listener(toplevel, &toplevel_listener, win)
+	wl.xdg_surface_add_listener(xdg_surface, &xdg_surface_listener, win)
+	wl.toplevel_add_listener(toplevel, &toplevel_listener, win)
 
-	xdg.toplevel_set_min_size(toplevel, 320, 180)
-	xdg.toplevel_set_app_id(toplevel, "glow")
-	xdg.toplevel_set_title(toplevel, win.title)
+	wl.toplevel_set_min_size(toplevel, 320, 180)
+	wl.toplevel_set_app_id(toplevel, "glow")
+	wl.toplevel_set_title(toplevel, win.title)
 
 	if win.ctx.viewporter != nil {
 		win.viewport = wl.viewporter_get_viewport(win.ctx.viewporter, win.surface)
@@ -640,8 +639,8 @@ hide_window :: proc(win: ^WaylandWindow) {
 		win.fractional_scale = nil
 	}
 
-	xdg.toplevel_destroy(win.toplevel)
-	xdg.surface_destroy(win.xdg_surface)
+	wl.toplevel_destroy(win.toplevel)
+	wl.xdg_surface_destroy(win.xdg_surface)
 
 	win.toplevel = nil
 	win.xdg_surface = nil
@@ -661,10 +660,10 @@ destroy_window :: proc(win: ^WaylandWindow) {
 		wl.viewport_destroy(win.viewport)
 	}
 	if win.toplevel != nil {
-		xdg.toplevel_destroy(win.toplevel)
+		wl.toplevel_destroy(win.toplevel)
 	}
 	if win.xdg_surface != nil {
-		xdg.surface_destroy(win.xdg_surface)
+		wl.xdg_surface_destroy(win.xdg_surface)
 	}
 	if win.surface != nil {
 		wl.surface_destroy(win.surface)
@@ -718,9 +717,9 @@ set_window_fullscreen :: proc(win: ^WaylandWindow, fullscreen: bool) {
 		return
 	}
 	if fullscreen {
-		xdg.toplevel_set_fullscreen(win.toplevel, nil)
+		wl.toplevel_set_fullscreen(win.toplevel, nil)
 	} else {
-		xdg.toplevel_unset_fullscreen(win.toplevel)
+		wl.toplevel_unset_fullscreen(win.toplevel)
 	}
 	win.fullscreen = fullscreen
 }
