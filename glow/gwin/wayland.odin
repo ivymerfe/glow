@@ -445,6 +445,11 @@ fractional_scale_preferred_scale :: proc "c" (
 	// Scale is encoded as 120ths (e.g., 120 = 1.0, 240 = 2.0, 180 = 1.5)
 	win.scale = f32(scale_120) / 120.0
 	log.infof("Window %d scale changed to %.2f", win.id, win.scale)
+	wl.toplevel_set_max_size(
+		win.toplevel,
+		int(win.buffer_width / win.scale),
+		int(win.buffer_height / win.scale),
+	)
 	if win.viewport != nil {
 		wl.viewport_set_destination(
 			win.viewport,
@@ -587,6 +592,11 @@ show_window :: proc(win: ^WaylandWindow) {
 	wl.toplevel_add_listener(toplevel, &toplevel_listener, win)
 
 	wl.toplevel_set_min_size(toplevel, 320, 180)
+	wl.toplevel_set_max_size(
+		toplevel,
+		int(win.buffer_width / win.scale),
+		int(win.buffer_height / win.scale),
+	)
 	wl.toplevel_set_app_id(toplevel, "glow")
 	wl.toplevel_set_title(toplevel, win.title)
 
