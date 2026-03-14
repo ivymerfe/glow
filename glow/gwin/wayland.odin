@@ -53,6 +53,7 @@ WaylandContext :: struct {
 	seat:                     ^wl.seat,
 	keyboard:                 ^wl.keyboard,
 	pointer:                  ^wl.pointer,
+	viewporter:               ^wl.viewporter,
 	fractional_scale_manager: ^wl.fractional_scale_manager_v1,
 	surface_to_window:        map[^wl.surface]^WaylandWindow,
 	focused_window:           ^WaylandWindow,
@@ -66,10 +67,13 @@ WaylandWindow :: struct {
 	surface:          ^wl.surface,
 	xdg_surface:      ^xdg.surface,
 	toplevel:         ^xdg.toplevel,
+	viewport:         ^wl.viewport,
 	fractional_scale: ^wl.fractional_scale_v1,
 	title:            cstring,
 	width:            int,
 	height:           int,
+	buffer_width:     f32,
+	buffer_height:    f32,
 	scale:            f32,
 	configured:       bool,
 	fullscreen:       bool,
@@ -154,6 +158,13 @@ registry_global :: proc "c" (
 	} else if interface == wl.seat_interface.name {
 		ctx.seat = cast(^wl.seat)wl.registry_bind(registry, name, &wl.seat_interface, 5)
 		wl.seat_add_listener(ctx.seat, &seat_listener, data)
+	} else if interface == wl.viewporter_interface.name {
+		ctx.viewporter = cast(^wl.viewporter)wl.registry_bind(
+			registry,
+			name,
+			&wl.viewporter_interface,
+			1,
+		)
 	} else if interface == wl.fractional_scale_manager_v1_interface.name {
 		ctx.fractional_scale_manager = cast(^wl.fractional_scale_manager_v1)wl.registry_bind(
 			registry,
@@ -435,6 +446,13 @@ fractional_scale_preferred_scale :: proc "c" (
 	// Scale is encoded as 120ths (e.g., 120 = 1.0, 240 = 2.0, 180 = 1.5)
 	win.scale = f32(scale_120) / 120.0
 	log.infof("Window %d scale changed to %.2f", win.id, win.scale)
+	if win.viewport != nil {
+		wl.viewport_set_destination(
+			win.viewport,
+			int(win.buffer_width / win.scale),
+			int(win.buffer_height / win.scale),
+		)
+	}
 }
 
 create_wayland_context :: proc(ctx: ^WaylandContext, event_handler: WindowEventHandler) -> bool {
@@ -482,6 +500,9 @@ destroy_wayland_context :: proc(ctx: ^WaylandContext) {
 	if ctx.fractional_scale_manager != nil {
 		wl.fractional_scale_manager_v1_destroy(ctx.fractional_scale_manager)
 	}
+	if ctx.viewporter != nil {
+		wl.viewporter_destroy(ctx.viewporter)
+	}
 	if ctx.wm_base != nil {
 		xdg.wm_base_destroy(ctx.wm_base)
 	}
@@ -504,6 +525,8 @@ create_window :: proc(
 	title: cstring,
 	width: int,
 	height: int,
+	buffer_width: f32,
+	buffer_height: f32,
 ) -> (
 	window: ^WaylandWindow,
 	success: bool,
@@ -525,6 +548,8 @@ create_window :: proc(
 	window.title = title
 	window.width = width
 	window.height = height
+	window.buffer_width = buffer_width
+	window.buffer_height = buffer_height
 	window.scale = 1.0
 	window.visible = false
 
@@ -566,7 +591,16 @@ show_window :: proc(win: ^WaylandWindow) {
 	xdg.toplevel_set_app_id(toplevel, "glow")
 	xdg.toplevel_set_title(toplevel, win.title)
 
-	// Set up fractional scaling if available
+	if win.ctx.viewporter != nil {
+		win.viewport = wl.viewporter_get_viewport(win.ctx.viewporter, win.surface)
+		if win.viewport != nil {
+			wl.viewport_set_destination(
+				win.viewport,
+				int(win.buffer_width / win.scale),
+				int(win.buffer_height / win.scale),
+			)
+		}
+	}
 	if win.ctx.fractional_scale_manager != nil {
 		win.fractional_scale = wl.fractional_scale_manager_v1_get_fractional_scale(
 			win.ctx.fractional_scale_manager,
@@ -582,7 +616,6 @@ show_window :: proc(win: ^WaylandWindow) {
 	}
 
 	wl.surface_commit(win.surface)
-
 	wl.display_roundtrip(win.ctx.display)
 
 	win.visible = true
@@ -596,6 +629,11 @@ hide_window :: proc(win: ^WaylandWindow) {
 	}
 	wl.surface_attach(win.surface, nil, 0, 0)
 	wl.surface_commit(win.surface)
+
+	if win.viewport != nil {
+		wl.viewport_destroy(win.viewport)
+		win.viewport = nil
+	}
 
 	if win.fractional_scale != nil {
 		wl.fractional_scale_v1_destroy(win.fractional_scale)
@@ -618,6 +656,9 @@ destroy_window :: proc(win: ^WaylandWindow) {
 	}
 	if win.fractional_scale != nil {
 		wl.fractional_scale_v1_destroy(win.fractional_scale)
+	}
+	if win.viewport != nil {
+		wl.viewport_destroy(win.viewport)
 	}
 	if win.toplevel != nil {
 		xdg.toplevel_destroy(win.toplevel)
@@ -683,4 +724,3 @@ set_window_fullscreen :: proc(win: ^WaylandWindow, fullscreen: bool) {
 	}
 	win.fullscreen = fullscreen
 }
-

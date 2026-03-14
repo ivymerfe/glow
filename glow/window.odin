@@ -19,7 +19,7 @@ GlowWindow :: struct {
 
 create_window :: proc(ctx: ^gwin.WaylandContext, window_id: u32, win: ^GlowWindow) {
 	win.id = window_id
-	native, success := gwin.create_window(ctx, window_id, "glow", 640, 360)
+	native, success := gwin.create_window(ctx, window_id, "glow", 640, 360, SWAPCHAIN_WIDTH, SWAPCHAIN_HEIGHT)
 	if !success {
 		log.panic("Failed to create Wayland window")
 	}
