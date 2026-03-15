@@ -24,7 +24,7 @@ VS_FULLSCREEN_SPV: []u8 = #load("shaders/vs_fullscreen.spv")
 
 ResourceManager :: struct {
 	using vk_context: VulkanContext,
-	images:           [dynamic]GlowImage,
+	images:           [dynamic]^GlowImage,
 	descriptor_pool:  vk.DescriptorPool,
 	vs_fullscreen:    vk.ShaderModule,
 	image_width:      u32,
@@ -67,8 +67,9 @@ destroy_resource_manager :: proc(res: ^ResourceManager) {
 	vk.DestroyDescriptorPool(device, res.descriptor_pool, nil)
 	vk.DestroyShaderModule(device, res.vs_fullscreen, nil)
 
-	for &image in res.images {
-		destroy_image(&res.vk_context, &image)
+	for image in res.images {
+		destroy_image(&res.vk_context, image)
+		free(image)
 	}
 }
 
@@ -76,13 +77,14 @@ acquire_image :: proc(res: ^ResourceManager) -> ^GlowImage {
 	for image, i in res.images {
 		if image.used == 0 {
 			res.images[i].used = 1
-			return &res.images[i]
+			return res.images[i]
 		}
 	}
-	new_image := create_image(&res.vk_context, res.image_width, res.image_height)
+	new_image := new(GlowImage)
+	create_image(&res.vk_context, res.image_width, res.image_height, new_image)
 	new_image.used = 1
 	append(&res.images, new_image)
-	return &res.images[len(res.images) - 1]
+	return new_image
 }
 
 release_image :: proc(res: ^ResourceManager, image: ^GlowImage) {
@@ -112,7 +114,7 @@ transition_image :: proc(
 	image.src_access = new_access
 }
 
-create_image :: proc(vk_context: ^VulkanContext, width: u32, height: u32) -> GlowImage {
+create_image :: proc(vk_context: ^VulkanContext, width: u32, height: u32, image: ^GlowImage) {
 	extent := vk.Extent2D {
 		width  = width,
 		height = height,
@@ -126,7 +128,7 @@ create_image :: proc(vk_context: ^VulkanContext, width: u32, height: u32) -> Glo
 		.UNDEFINED,
 	)
 	view := create_image_view_2d(vk_context, img, TARGET_FORMAT, {.COLOR})
-	return GlowImage {
+	image^ = GlowImage {
 		extent = extent,
 		format = TARGET_FORMAT,
 		image = img,

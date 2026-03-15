@@ -19,8 +19,8 @@ Program :: struct {
 	layout:            vk.PipelineLayout,
 	descriptor_set:    vk.DescriptorSet,
 	buffer_index:      int,
-	passes:            [dynamic]ProgramPass,
-	images:            [dynamic]^GlowImage,
+	passes:            []ProgramPass,
+	images:            []^GlowImage,
 	images_loaded:     bool,
 }
 
@@ -87,6 +87,10 @@ compile_program :: proc(
 		log.debugf("[%s] no entry points found", path)
 		return
 	}
+	prog.passes = make([]ProgramPass, entry_point_count)
+	prog.images = make([]^GlowImage, entry_point_count + 1)
+
+	entry_idx := 0
 	for i in 0 ..< entry_point_count {
 		entry_layout := layout_wrap->getEntryPointByIndex(i)
 		if entry_layout->getStage() == .FRAGMENT {
@@ -95,9 +99,14 @@ compile_program :: proc(
 				entry_name = entry_layout->getName()
 			}
 			entry: ^slang.IComponentType
-			append(&prog.passes, ProgramPass{entry_name = entry_name})
+			prog.passes[entry_idx] = ProgramPass {
+				entry_name = entry_name,
+			}
+			entry_idx += 1
 		}
 	}
+	prog.passes = prog.passes[:entry_idx]
+	prog.images = prog.images[:entry_idx + 1]
 	if len(prog.passes) == 0 {
 		log.debugf("[%s] no fragment entry points found", path)
 		return
@@ -164,8 +173,8 @@ destroy_program :: proc(ctx: ^Program) {
 
 load_program_images :: proc(prog: ^Program) {
 	image_count := len(prog.passes) + 1
-	for _ in 0 ..< image_count {
-		append(&prog.images, acquire_image(prog.res))
+	for i in 0 ..< image_count {
+		prog.images[i] = acquire_image(prog.res)
 	}
 	update_descriptor_set(prog, prog.descriptor_set)
 	prog.images_loaded = true
