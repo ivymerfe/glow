@@ -6,11 +6,12 @@ struct PushConstants
     float4 camera_up;
     float2 mouse_pos;
     uint2 mouse_data;
-    uint4 keyboard_pressed;
     uint4 keyboard_down;
     float aspect_ratio;
     float time;
-    uint frame_index;
+    uint frame_idx;
+    uint base_idx;
+    uint prev_idx;
 }
 
 [[vk::push_constant]]
@@ -40,9 +41,10 @@ float g(float3 p, float s)
 }
 
 [shader("pixel")]
-float4 main(VertexOutput in) : SV_Target0
+float4 pass(VertexOutput in) : SV_Target0
 {
-    float2 uv = in.uv;
+    float2 uv = in.uv - 0.5;
+    uv.x *= scene.aspect_ratio;
     float3 dir = normalize(float3(uv.x, uv.y, 1.0));
     float3 pos = float3(0., 0., scene.time * 0.1);
     float3 color = float3(0);
@@ -54,5 +56,6 @@ float4 main(VertexOutput in) : SV_Target0
         color += 0.1 * (palette(t)) / (abs(d) + 0.01);
         t += d + 0.4;
     }
+    float2 r = (uv + 1) / 2;
     return float4(pow(tanh(color / 8.), 2.2), 1.0);
 }

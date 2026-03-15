@@ -169,7 +169,7 @@ def run_controller(glow_bin: str, glow_args: list[str]) -> int:
             raise RuntimeError("glow.bin stdin closed (process exited?)")
     
     send(encode_create(0))
-    path = "test.slang"
+    path = "test_multipass.slang"
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         src_text = f.read()
     send(encode_program(0, path, src_text))

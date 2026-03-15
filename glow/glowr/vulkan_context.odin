@@ -157,14 +157,18 @@ create_logical_device :: proc(vkc: ^VulkanContext, surface: vk.SurfaceKHR) {
 		pNext                   = &vk.PhysicalDeviceFeatures2 {
 			sType = .PHYSICAL_DEVICE_FEATURES_2,
 			features = {shaderInt64 = true},
-			pNext = &vk.PhysicalDeviceVulkan13Features {
-				sType = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-				pNext = &vk.PhysicalDeviceExtendedDynamicStateFeaturesEXT {
-					sType = .PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT,
-					extendedDynamicState = true,
+			pNext = &vk.PhysicalDeviceVulkan12Features {
+				sType = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+				pNext = &vk.PhysicalDeviceVulkan13Features {
+					sType = .PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+					pNext = &vk.PhysicalDeviceExtendedDynamicStateFeaturesEXT {
+						sType = .PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT,
+						extendedDynamicState = true,
+					},
+					synchronization2 = true,
+					dynamicRendering = true,
 				},
-				synchronization2 = true,
-				dynamicRendering = true,
+				runtimeDescriptorArray = true,
 			},
 		},
 		pQueueCreateInfos       = &vk.DeviceQueueCreateInfo {

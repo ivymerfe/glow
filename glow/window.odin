@@ -9,17 +9,26 @@ import "gwin"
 import vk "vendor:vulkan"
 
 GlowWindow :: struct {
-	id:      u32,
-	native:  ^gwin.WaylandWindow,
-	ren:     glowr.Renderer,
-	visible: bool,
-	active:  bool,
-	timer:   time.Stopwatch,
+	id:        u32,
+	native:    ^gwin.WaylandWindow,
+	ren:       glowr.Renderer,
+	visible:   bool,
+	active:    bool,
+	timer:     time.Stopwatch,
+	frame_idx: u32,
 }
 
 create_window :: proc(ctx: ^gwin.WaylandContext, window_id: u32, win: ^GlowWindow) {
 	win.id = window_id
-	native, success := gwin.create_window(ctx, window_id, "glow", 640, 360, SWAPCHAIN_WIDTH, SWAPCHAIN_HEIGHT)
+	native, success := gwin.create_window(
+		ctx,
+		window_id,
+		"glow",
+		640,
+		360,
+		SWAPCHAIN_WIDTH,
+		SWAPCHAIN_HEIGHT,
+	)
 	if !success {
 		log.panic("Failed to create Wayland window")
 	}
@@ -59,6 +68,6 @@ should_render :: proc(win: ^GlowWindow) -> bool {
 	return(
 		sync.atomic_load(&win.visible) &&
 		sync.atomic_load(&win.active) &&
-		sync.atomic_load(&win.ren.context_buffer.ready) \
+		sync.atomic_load(&win.ren.program_buf.ready) \
 	)
 }

@@ -25,27 +25,30 @@ Renderer :: struct {
 	cmd_pool:                   vk.CommandPool,
 	cmd_buffer:                 vk.CommandBuffer,
 	render_fence:               vk.Fence,
-	context_buffer:             ProgramBuffer,
+	program_buf:                ProgramBuffer,
 }
 
 PushConstants :: struct {
-	camera_pos:       [4]f32,
-	camera_forward:   [4]f32,
-	camera_right:     [4]f32,
-	camera_up:        [4]f32,
-	mouse_pos:        [2]f32,
-	mouse_data:       [2]u32,
-	keyboard_pressed: [4]u32,
-	keyboard_down:    [4]u32,
-	aspect_ratio:     f32,
-	time:             f32,
-	frame_index:      u32,
+	camera_pos:     [4]f32,
+	camera_forward: [4]f32,
+	camera_right:   [4]f32,
+	camera_up:      [4]f32,
+	mouse_pos:      [2]f32,
+	mouse_data:     [2]u32,
+	keyboard_down:  [4]u32,
+	aspect_ratio:   f32,
+	time:           f32,
+	frame_idx:      u32,
+	base_idx:       u32,
+	prev_idx:       u32,
 }
 
 RenderInfo :: struct {
-	width:     u32,
-	height:    u32,
-	constants: PushConstants,
+	width:      u32,
+	height:     u32,
+	dst_width:  u32,
+	dst_height: u32,
+	constants:  PushConstants,
 }
 
 create_renderer :: proc(
@@ -129,10 +132,10 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 	if fence_status == .NOT_READY {
 		return false
 	}
-	if !sync.atomic_load(&ren.context_buffer.ready) {
+	if !sync.atomic_load(&ren.program_buf.ready) {
 		return false
 	}
-	prog := program_buffer_get(&ren.context_buffer)
+	prog := program_buffer_get(&ren.program_buf)
 	swapchain := ren.swapchain
 
 	sem_image_available := ren.image_available_semaphore
@@ -166,16 +169,22 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 	vk.BeginCommandBuffer(cmd_buffer, &begin_info)
 
 	draw_program(prog, cmd_buffer, render_info)
+	target := get_output_image(prog)
+	if target == nil {
+		log.panic("no program output")
+	}
+
+	transition_image(cmd_buffer, target, .TRANSFER_SRC_OPTIMAL, {.TRANSFER}, {.TRANSFER_READ})
 
 	transition_image_layout(
 		cmd_buffer,
 		swapchain_image,
 		.UNDEFINED,
 		.TRANSFER_DST_OPTIMAL,
-		{},
-		{.TRANSFER_WRITE},
 		{.BOTTOM_OF_PIPE},
 		{.TRANSFER},
+		{},
+		{.TRANSFER_WRITE},
 		{.COLOR},
 	)
 	copy_region := vk.ImageBlit {
@@ -188,15 +197,15 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 		dstOffsets = [2]vk.Offset3D {
 			{0, 0, 0},
 			{
-				i32(min(swapchain.extent.width, render_info.width)),
-				i32(min(swapchain.extent.height, render_info.height)),
+				i32(min(swapchain.extent.width, render_info.dst_width)),
+				i32(min(swapchain.extent.height, render_info.dst_height)),
 				1,
 			},
 		},
 	}
 	vk.CmdBlitImage(
 		cmd_buffer,
-		prog.res.target.image,
+		target.image,
 		.TRANSFER_SRC_OPTIMAL,
 		swapchain_image,
 		.TRANSFER_DST_OPTIMAL,
@@ -209,10 +218,10 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 		swapchain_image,
 		.TRANSFER_DST_OPTIMAL,
 		.PRESENT_SRC_KHR,
-		{.TRANSFER_WRITE},
-		{},
 		{.TRANSFER},
 		{.BOTTOM_OF_PIPE},
+		{.TRANSFER_WRITE},
+		{},
 		{.COLOR},
 	)
 	vk.EndCommandBuffer(cmd_buffer)

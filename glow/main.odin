@@ -119,7 +119,7 @@ command_handler :: proc(cmd_union: GlowCommand) {
 		win := renderer_get_window(&g_ctx.renderer, cmd.window_id)
 		if win != nil {
 			req := CompileRequest {
-				buf    = &win.ren.context_buffer,
+				buf    = &win.ren.program_buf,
 				path   = transmute(string)cmd.path,
 				source = transmute(string)cmd.source,
 			}

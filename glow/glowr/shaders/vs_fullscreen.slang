@@ -35,7 +35,7 @@ VertexOutput main(uint vertexIndex: SV_VertexID)
 {
     VertexOutput out;
     out.pos.xy = TRI[vertexIndex];
-    out.uv.x = out.pos.x * 0.5 * scene.aspect_ratio;
-    out.uv.y = out.pos.y * 0.5;
+    out.uv.x = (out.pos.x + 1.0) * 0.5;
+    out.uv.y = (out.pos.y + 1.0) * 0.5;
     return out;
 }

@@ -30,8 +30,8 @@ transition_image_layout :: proc(
 	command_buffer: vk.CommandBuffer,
 	image: vk.Image,
 	old_layout, new_layout: vk.ImageLayout,
-	src_access_mask, dst_access_mask: vk.AccessFlags2,
 	src_stage_mask, dst_stage_mask: vk.PipelineStageFlags2,
+	src_access_mask, dst_access_mask: vk.AccessFlags2,
 	aspect_mask: vk.ImageAspectFlags,
 ) {
 	barrier := vk.ImageMemoryBarrier2 {
@@ -77,7 +77,7 @@ try_allocate :: proc(
 	log.panic("Failed to find memory type")
 }
 
-create_2d_image :: proc(
+create_image_2d :: proc(
 	vkc: ^VulkanContext,
 	format: vk.Format,
 	width, height: u32,

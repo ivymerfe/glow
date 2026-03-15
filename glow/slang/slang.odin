@@ -3,11 +3,11 @@ package slang
 import "core:c"
 
 when ODIN_OS == .Windows {
-	foreign import libslang "slang.lib"
+	foreign import libslang "lib/slang.lib"
 }
 
 when ODIN_OS == .Darwin {
-	foreign import libslang "libslang.dylib"
+	foreign import libslang "lib/libslang.dylib"
 }
 
 when ODIN_OS == .Linux {
@@ -904,3 +904,4 @@ foreign libslang {
 	shutdown :: proc() ---
 	getLastInternalErrorMessage :: proc() -> cstring ---
 }
+

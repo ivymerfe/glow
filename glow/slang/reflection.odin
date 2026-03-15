@@ -5,7 +5,7 @@ when ODIN_OS == .Windows {
 } else when ODIN_OS == .Darwin {
 	foreign import libslang "lib/libslang.dylib"
 } else when ODIN_OS == .Linux {
-	foreign import libslang "lib/libslang.so"
+	foreign import libslang "libslang-compiler.so"
 }
 _ :: libslang
 
