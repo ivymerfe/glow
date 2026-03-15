@@ -134,7 +134,7 @@ create_image :: proc(vk_context: ^VulkanContext, width: u32, height: u32) -> Glo
 		mem = mem,
 		layout = .UNDEFINED,
 		src_stage = {vk.PipelineStageFlags2.TOP_OF_PIPE},
-		src_access = vk.AccessFlags2{},
+		src_access = {},
 		used = 0,
 	}
 }

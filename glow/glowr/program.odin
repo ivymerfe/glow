@@ -52,19 +52,17 @@ compile_program :: proc(
 	components := make([]^slang.IComponentType, entry_count + 1, context.temp_allocator)
 	for i in 0 ..< entry_count {
 		entry: ^slang.IEntryPoint
-		slang_check(module->getDefinedEntryPoint(i, &entry))
+		module->getDefinedEntryPoint(i, &entry)
 		components[i] = entry
 	}
 	components[entry_count] = module
 
 	composed_program: ^slang.IComponentType
-	slang_check(
-		session->createCompositeComponentType(
-			&components[0],
-			len(components),
-			&composed_program,
-			&diagnostics,
-		),
+	session->createCompositeComponentType(
+		&components[0],
+		len(components),
+		&composed_program,
+		&diagnostics,
 	)
 	diagnostics_check(path, diagnostics)
 	if composed_program == nil {
@@ -73,7 +71,7 @@ compile_program :: proc(
 	defer composed_program->release()
 
 	linked_program: ^slang.IComponentType
-	slang_check(composed_program->link(&linked_program, &diagnostics))
+	composed_program->link(&linked_program, &diagnostics)
 	diagnostics_check(path, diagnostics)
 	if linked_program == nil {
 		return
@@ -106,7 +104,7 @@ compile_program :: proc(
 	}
 	target_code: ^slang.IBlob
 
-	slang_check(linked_program->getTargetCode(0, &target_code, &diagnostics))
+	linked_program->getTargetCode(0, &target_code, &diagnostics)
 	diagnostics_check(path, diagnostics)
 	if target_code == nil {
 		return
@@ -177,18 +175,17 @@ draw_program :: proc(prog: ^Program, cmd: vk.CommandBuffer, render_info: ^Render
 	if len(prog.passes) == 0 {
 		return
 	}
-	for image in prog.images {
-		transition_image(cmd, image, .GENERAL, {.FRAGMENT_SHADER}, {.SHADER_READ})
-	}
 	source_idx := prog.buffer_index
+	image_count := len(prog.images)
 	pass_constants := render_info.constants
-	pass_constants.base_idx = u32((source_idx + 1) % len(prog.images))
+	pass_constants.base_idx = u32((source_idx + 1) % image_count)
+	pass_constants.buf_count = u32(image_count)
 
 	for pass in prog.passes {
-		target_idx := (source_idx + 1) % len(prog.images)
+		target_idx := (source_idx + 1) % image_count
 		target := prog.images[target_idx]
 
-		pass_constants.prev_idx = u32((source_idx + 2) % len(prog.images))
+		pass_constants.prev_idx = u32((source_idx + 2) % image_count)
 
 		transition_image(
 			cmd,

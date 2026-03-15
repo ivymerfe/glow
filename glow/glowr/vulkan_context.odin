@@ -37,6 +37,7 @@ destroy_vulkan_context :: proc(vkc: ^VulkanContext) {
 	}
 }
 
+g_vk_runtime_context: runtime.Context
 create_vk_instance :: proc() -> vk.Instance {
 	g_module, loaded := dynlib.load_library("libvulkan.so.1", true)
 	if !loaded {
@@ -89,7 +90,7 @@ create_vk_instance :: proc() -> vk.Instance {
 		if context.logger.lowest_level <= .Debug {
 			severity |= {.VERBOSE}
 		}
-
+		g_vk_runtime_context = context
 		dbg_create_info := vk.DebugUtilsMessengerCreateInfoEXT {
 			sType           = .DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
 			messageSeverity = severity,
@@ -114,7 +115,7 @@ vk_messenger_callback :: proc "system" (
 	pCallbackData: ^vk.DebugUtilsMessengerCallbackDataEXT,
 	pUserData: rawptr,
 ) -> b32 {
-	context = runtime.default_context()
+	context = g_vk_runtime_context
 	msg := pCallbackData.pMessage
 	when ENABLE_VALIDATION {
 		if .ERROR in messageSeverity {

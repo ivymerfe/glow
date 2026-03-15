@@ -12,6 +12,7 @@ struct PushConstants
     uint frame_idx;
     uint base_idx;
     uint prev_idx;
+    uint buf_count;
 }
 
 [[vk::push_constant]]

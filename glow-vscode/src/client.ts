@@ -110,7 +110,7 @@ export class GlowClient {
       const payloadLen = this.stdoutBuffer.readUInt32LE(0);
       if (payloadLen > 16 * 1024 * 1024) {
         this.onWarning?.(
-          `Glow: dropping stdout buffer (invalid message length ${payloadLen}).`,
+          `Glow: dropping stdout buffer (invalid message length ${payloadLen}). ${chunk.toString()}`,
         );
         this.stdoutBuffer = Buffer.alloc(0);
         return;

@@ -15,7 +15,7 @@ import vk "vendor:vulkan"
 
 
 main :: proc() {
-	context.logger = log.create_file_logger(os.stderr, log.Level.Debug)
+	context.logger = log.create_file_logger(os.stderr, log.Level.Info)
 
 	init_input()
 

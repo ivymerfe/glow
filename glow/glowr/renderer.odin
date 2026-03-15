@@ -41,6 +41,7 @@ PushConstants :: struct {
 	frame_idx:      u32,
 	base_idx:       u32,
 	prev_idx:       u32,
+	buf_count:      u32,
 }
 
 RenderInfo :: struct {
@@ -213,6 +214,8 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 		&copy_region,
 		.LINEAR,
 	)
+	transition_image(cmd_buffer, target, .GENERAL, {.FRAGMENT_SHADER}, {.SHADER_READ})
+
 	transition_image_layout(
 		cmd_buffer,
 		swapchain_image,
