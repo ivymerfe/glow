@@ -1,29 +1,4 @@
-struct PushConstants
-{
-    float4 camera_pos;
-    float4 camera_forward;
-    float4 camera_right;
-    float4 camera_up;
-    float2 mouse_pos;
-    uint2 mouse_data;
-    uint4 keyboard_down;
-    float aspect_ratio;
-    float time;
-    uint frame_idx;
-    uint pool_idx;
-    uint start_idx;
-    uint prev_idx;
-    uint image_count;
-}
-
-[[vk::push_constant]]
-PushConstants scene;
-
-struct VertexOutput
-{
-    float4 pos : SV_Position;
-    float2 uv : POS_UV;
-}
+import base;
 
 const static float PI = 3.1415926;
 
