@@ -10,15 +10,16 @@ struct PushConstants
     float aspect_ratio;
     float time;
     uint frame_idx;
-    uint base_idx;
+    uint pool_idx;
+    uint start_idx;
     uint prev_idx;
-    uint buf_count;
+    uint image_count;
 }
 
 [[vk::push_constant]]
 PushConstants scene;
 
-readonly RWTexture2D[] buffers;
+readonly RWTexture2D[] images;
 
 struct VertexOutput
 {
@@ -28,14 +29,13 @@ struct VertexOutput
 
 float3 prev(uint2 coord)
 {
-    return buffers[scene.prev_idx].Load(int2(coord.x, coord.y)).rgb;
+    return images[scene.pool_idx + scene.prev_idx].Load(int2(coord.x, coord.y)).rgb;
 }
 
-float3 buf0(uint2 coord)
+float3 read(uint image, uint2 coord)
 {
-    return buffers[scene.base_idx].Load(int2(coord.x, coord.y)).rgb;
+    return images[scene.pool_idx + (scene.start_idx + image) % scene.image_count].Load(int2(coord.x, coord.y)).rgb;
 }
-
 
 float3 avg3x3(uint2 coord)
 {
@@ -84,10 +84,10 @@ float get_thickness(float3 col)
 
 float3 get_normal(uint2 coord)
 {
-    float hx1 = get_thickness(buf0(coord + uint2(1, 0)));
-    float hx0 = get_thickness(buf0(coord + uint2(-1, 0)));
-    float hy1 = get_thickness(buf0(coord + uint2(0, 1)));
-    float hy0 = get_thickness(buf0(coord + uint2(0, -1)));
+    float hx1 = get_thickness(read(0, coord + uint2(1, 0)));
+    float hx0 = get_thickness(read(0, coord + uint2(-1, 0)));
+    float hy1 = get_thickness(read(0, coord + uint2(0, 1)));
+    float hy0 = get_thickness(read(0, coord + uint2(0, -1)));
     return normalize(float3(
         (hx0 - hx1) * 2.0,
         (hy0 - hy1) * 2.0,
@@ -106,7 +106,7 @@ float3 get_background(float3 rd)
 float4 pass_draw(VertexOutput in) : SV_Target0
 {
     uint2 coord = uint2(in.uv * float2(1920, 1080));
-    float3 ink = buf0(coord);
+    float3 ink = read(0, coord);
     float3 thickness = get_thickness(ink);
     float3 normal = get_normal(coord);
     float3 light_dir = normalize(float3(0.5, 0.7, -0.8));

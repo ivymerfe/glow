@@ -113,8 +113,7 @@ render_proc :: proc(raw: rawptr) {
 					height := f32(win.native.height) * win.native.scale
 					push.time = f32(time.duration_seconds(time.stopwatch_duration(win.timer)))
 					push.aspect_ratio = f32(width) / f32(height)
-					push.frame_idx = win.frame_idx
-					win.frame_idx += 1
+					push.frame_index = u32(win.frame_index)
 
 					render_info := glowr.RenderInfo {
 						width      = u32(TARGET_WIDTH),
@@ -124,6 +123,9 @@ render_proc :: proc(raw: rawptr) {
 						constants  = push,
 					}
 					rendered |= glowr.render(&win.ren, &render_info)
+					if rendered {
+						win.frame_index += 1
+					}
 				}
 			}
 			renderer_unlock(r)

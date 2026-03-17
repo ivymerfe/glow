@@ -25,6 +25,7 @@ Renderer :: struct {
 	cmd_pool:                   vk.CommandPool,
 	cmd_buffer:                 vk.CommandBuffer,
 	render_fence:               vk.Fence,
+	res:                        ^ResourceManager,
 	program_buf:                ProgramBuffer,
 }
 
@@ -38,10 +39,11 @@ PushConstants :: struct {
 	keyboard_down:  [4]u32,
 	aspect_ratio:   f32,
 	time:           f32,
-	frame_idx:      u32,
-	base_idx:       u32,
-	prev_idx:       u32,
-	buf_count:      u32,
+	frame_index:    u32,
+	pool_index:     u32,
+	start_index:    u32,
+	prev_index:     u32,
+	image_count:    u32,
 }
 
 RenderInfo :: struct {
@@ -54,12 +56,14 @@ RenderInfo :: struct {
 
 create_renderer :: proc(
 	vkc: VulkanContext,
+	res: ^ResourceManager,
 	surface: vk.SurfaceKHR,
 	swapchain_width: int,
 	swapchain_height: int,
 ) -> Renderer {
 	ren: Renderer
 	ren.vk_context = vkc
+	ren.res = res
 	ren.surface = surface
 
 	ren.swapchain_width = swapchain_width
@@ -169,8 +173,37 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 	}
 	vk.BeginCommandBuffer(cmd_buffer, &begin_info)
 
+	width := render_info.width
+	height := render_info.height
+	viewport := vk.Viewport {
+		x        = 0.0,
+		y        = 0.0,
+		width    = f32(width),
+		height   = f32(height),
+		minDepth = 0.0,
+		maxDepth = 1.0,
+	}
+	vk.CmdSetViewport(cmd_buffer, 0, 1, &viewport)
+
+	scissor := vk.Rect2D {
+		offset = vk.Offset2D{x = 0, y = 0},
+		extent = vk.Extent2D{width = u32(width), height = u32(height)},
+	}
+	vk.CmdSetScissor(cmd_buffer, 0, 1, &scissor)
+
+	vk.CmdBindDescriptorSets(
+		cmd_buffer,
+		.GRAPHICS,
+		ren.res.pipeline_layout,
+		0,
+		1,
+		&ren.res.desc_set,
+		0,
+		nil,
+	)
+
 	draw_program(prog, cmd_buffer, render_info)
-	target := get_output_image(prog)
+	target := get_program_output(prog)
 	if target == nil {
 		log.panic("no program output")
 	}

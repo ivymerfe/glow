@@ -12,16 +12,12 @@ ProgramPass :: struct {
 }
 
 Program :: struct {
-	using vk_context:  VulkanContext,
-	res:               ^ResourceManager,
-	shader:            vk.ShaderModule,
-	descriptor_layout: vk.DescriptorSetLayout,
-	layout:            vk.PipelineLayout,
-	descriptor_set:    vk.DescriptorSet,
-	buffer_index:      int,
-	passes:            []ProgramPass,
-	images:            []^GlowImage,
-	images_loaded:     bool,
+	using vk_context: VulkanContext,
+	res:              ^ResourceManager,
+	passes:           []ProgramPass,
+	pool_index:       u32,
+	start_index:      u32,
+	image_count:      u32,
 }
 
 compile_program :: proc(
@@ -30,6 +26,7 @@ compile_program :: proc(
 	global: ^slang.IGlobalSession,
 	path: cstring,
 	source: cstring,
+	pool_index: u32,
 ) -> (
 	success: bool,
 ) {
@@ -88,7 +85,6 @@ compile_program :: proc(
 		return
 	}
 	prog.passes = make([]ProgramPass, entry_point_count)
-	prog.images = make([]^GlowImage, entry_point_count + 1)
 
 	entry_idx := 0
 	for i in 0 ..< entry_point_count {
@@ -106,7 +102,6 @@ compile_program :: proc(
 		}
 	}
 	prog.passes = prog.passes[:entry_idx]
-	prog.images = prog.images[:entry_idx + 1]
 	if len(prog.passes) == 0 {
 		log.debugf("[%s] no fragment entry points found", path)
 		return
@@ -122,79 +117,60 @@ compile_program :: proc(
 
 	prog.vk_context = res.vk_context
 	prog.res = res
+	prog.pool_index = pool_index
+	prog.image_count = u32(len(prog.passes) + 1)
 	create_info := vk.ShaderModuleCreateInfo {
 		sType    = .SHADER_MODULE_CREATE_INFO,
 		codeSize = int(target_code->getBufferSize()),
 		pCode    = auto_cast target_code->getBufferPointer(),
 	}
-	vk_try(vk.CreateShaderModule(prog.device, &create_info, nil, &prog.shader))
+	shader: vk.ShaderModule
+	vk_try(vk.CreateShaderModule(prog.device, &create_info, nil, &shader))
 
-	create_descriptor_set(prog, len(prog.passes) + 1)
-	create_pipeline_layout(prog)
 	for &pass in prog.passes {
-		pass.pipeline = create_pipeline(prog, prog.shader, pass.entry_name)
+		pass.pipeline = create_pipeline(prog, shader, pass.entry_name)
 	}
-	load_program_images(prog)
+	vk.DestroyShaderModule(prog.device, shader, nil)
+
+	request_images(res, prog.pool_index, prog.image_count)
 	success = true
 	return
 }
 
-destroy_program :: proc(ctx: ^Program) {
-	for pass in ctx.passes {
+destroy_program :: proc(prog: ^Program) {
+	for pass in prog.passes {
 		if pass.pipeline != {} {
-			vk.DestroyPipeline(ctx.device, pass.pipeline, nil)
+			vk.DestroyPipeline(prog.device, pass.pipeline, nil)
 		}
 	}
-	delete(ctx.passes)
-
-	if ctx.descriptor_set != {} {
-		vk_try(vk.FreeDescriptorSets(ctx.device, ctx.res.descriptor_pool, 1, &ctx.descriptor_set))
-	}
-	ctx.descriptor_set = {}
-
-	if ctx.images_loaded {
-		for image in ctx.images {
-			release_image(ctx.res, image)
-		}
-		delete(ctx.images)
-		ctx.images_loaded = false
-	}
-
-	if ctx.layout != {} {
-		vk.DestroyPipelineLayout(ctx.device, ctx.layout, nil)
-	}
-	if ctx.descriptor_layout != {} {
-		vk.DestroyDescriptorSetLayout(ctx.device, ctx.descriptor_layout, nil)
-	}
-	if ctx.shader != {} {
-		vk.DestroyShaderModule(ctx.device, ctx.shader, nil)
-	}
+	delete(prog.passes)
 }
 
-load_program_images :: proc(prog: ^Program) {
-	image_count := len(prog.passes) + 1
-	for i in 0 ..< image_count {
-		prog.images[i] = acquire_image(prog.res)
-	}
-	update_descriptor_set(prog, prog.descriptor_set)
-	prog.images_loaded = true
+get_program_output :: proc(prog: ^Program) -> ^GlowImage {
+	return get_image(
+		prog.res,
+		prog.pool_index + (prog.start_index + prog.image_count - 1) % prog.image_count,
+	)
+}
+
+shift_program_images :: proc(prog: ^Program) {
+	prog.start_index = (prog.start_index + 1) % prog.image_count
 }
 
 draw_program :: proc(prog: ^Program, cmd: vk.CommandBuffer, render_info: ^RenderInfo) {
 	if len(prog.passes) == 0 {
 		return
 	}
-	source_idx := prog.buffer_index
-	image_count := len(prog.images)
+	image_count := prog.image_count
+
 	pass_constants := render_info.constants
-	pass_constants.base_idx = u32((source_idx + 1) % image_count)
-	pass_constants.buf_count = u32(image_count)
+	pass_constants.start_index = prog.start_index
+	pass_constants.pool_index = prog.pool_index
+	pass_constants.image_count = image_count
 
-	for pass in prog.passes {
-		target_idx := (source_idx + 1) % image_count
-		target := prog.images[target_idx]
-
-		pass_constants.prev_idx = u32((source_idx + 2) % image_count)
+	for pass, pass_index in prog.passes {
+		target := get_image(prog.res, prog.pool_index + prog.start_index)
+		pass_constants.prev_index = (prog.start_index + 1) % image_count
 
 		transition_image(
 			cmd,
@@ -224,29 +200,10 @@ draw_program :: proc(prog: ^Program, cmd: vk.CommandBuffer, render_info: ^Render
 		vk.CmdBeginRendering(cmd, &rendering_info)
 
 		vk.CmdBindPipeline(cmd, .GRAPHICS, pass.pipeline)
-		vk.CmdBindDescriptorSets(cmd, .GRAPHICS, prog.layout, 0, 1, &prog.descriptor_set, 0, nil)
-
-		width := render_info.width
-		height := render_info.height
-		viewport := vk.Viewport {
-			x        = 0.0,
-			y        = 0.0,
-			width    = f32(width),
-			height   = f32(height),
-			minDepth = 0.0,
-			maxDepth = 1.0,
-		}
-		vk.CmdSetViewport(cmd, 0, 1, &viewport)
-
-		scissor := vk.Rect2D {
-			offset = vk.Offset2D{x = 0, y = 0},
-			extent = vk.Extent2D{width = u32(width), height = u32(height)},
-		}
-		vk.CmdSetScissor(cmd, 0, 1, &scissor)
 
 		vk.CmdPushConstants(
 			cmd,
-			prog.layout,
+			prog.res.pipeline_layout,
 			{.VERTEX, .FRAGMENT},
 			0,
 			size_of(PushConstants),
@@ -257,84 +214,8 @@ draw_program :: proc(prog: ^Program, cmd: vk.CommandBuffer, render_info: ^Render
 		vk.CmdEndRendering(cmd)
 
 		transition_image(cmd, target, .GENERAL, {.FRAGMENT_SHADER}, {.SHADER_READ})
-		source_idx = target_idx
+		shift_program_images(prog)
 	}
-	prog.buffer_index = source_idx
-}
-
-get_output_image :: proc(prog: ^Program) -> ^GlowImage {
-	if !prog.images_loaded || len(prog.passes) == 0 {
-		return nil
-	}
-	return prog.images[prog.buffer_index]
-}
-
-@(private = "file")
-create_descriptor_set :: proc(prog: ^Program, image_count: int) {
-	binding := vk.DescriptorSetLayoutBinding {
-		binding            = 0,
-		descriptorType     = .STORAGE_IMAGE,
-		descriptorCount    = u32(image_count),
-		stageFlags         = {.FRAGMENT},
-		pImmutableSamplers = nil,
-	}
-	layout_info := vk.DescriptorSetLayoutCreateInfo {
-		sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-		bindingCount = 1,
-		pBindings    = &binding,
-	}
-	vk_try(vk.CreateDescriptorSetLayout(prog.device, &layout_info, nil, &prog.descriptor_layout))
-
-	layouts := [1]vk.DescriptorSetLayout{prog.descriptor_layout}
-	alloc_info := vk.DescriptorSetAllocateInfo {
-		sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-		descriptorPool     = prog.res.descriptor_pool,
-		descriptorSetCount = 1,
-		pSetLayouts        = &layouts[0],
-	}
-	descriptor_sets: [1]vk.DescriptorSet
-	vk_try(vk.AllocateDescriptorSets(prog.device, &alloc_info, &descriptor_sets[0]))
-	prog.descriptor_set = descriptor_sets[0]
-}
-
-@(private = "file")
-update_descriptor_set :: proc(prog: ^Program, descriptor_set: vk.DescriptorSet) {
-	image_count := len(prog.images)
-	image_infos := make([]vk.DescriptorImageInfo, image_count, context.temp_allocator)
-	for i in 0 ..< image_count {
-		image := prog.images[i]
-		image_infos[i] = vk.DescriptorImageInfo {
-			imageLayout = .GENERAL,
-			imageView   = image.view,
-		}
-	}
-
-	write := vk.WriteDescriptorSet {
-		sType           = .WRITE_DESCRIPTOR_SET,
-		dstSet          = descriptor_set,
-		dstBinding      = 0,
-		dstArrayElement = 0,
-		descriptorCount = u32(image_count),
-		descriptorType  = .STORAGE_IMAGE,
-		pImageInfo      = raw_data(image_infos),
-	}
-	vk.UpdateDescriptorSets(prog.device, 1, &write, 0, nil)
-}
-
-@(private = "file")
-create_pipeline_layout :: proc(prog: ^Program) {
-	push_constant_ranges := []vk.PushConstantRange {
-		{stageFlags = {.VERTEX, .FRAGMENT}, offset = 0, size = size_of(PushConstants)},
-	}
-	descriptor_layouts := []vk.DescriptorSetLayout{prog.descriptor_layout}
-	layout_info := vk.PipelineLayoutCreateInfo {
-		sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-		pushConstantRangeCount = 1,
-		pPushConstantRanges    = raw_data(push_constant_ranges),
-		setLayoutCount         = 1,
-		pSetLayouts            = raw_data(descriptor_layouts),
-	}
-	vk_try(vk.CreatePipelineLayout(prog.device, &layout_info, nil, &prog.layout))
 }
 
 @(private = "file")
@@ -424,7 +305,7 @@ create_pipeline :: proc(
 		pColorBlendState    = &color_blending,
 		pDynamicState       = &dynamic_state,
 		pDepthStencilState  = &depth_stencil_state,
-		layout              = prog.layout,
+		layout              = prog.res.pipeline_layout,
 		subpass             = 0,
 		basePipelineIndex   = -1,
 	}

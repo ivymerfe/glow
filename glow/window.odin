@@ -9,13 +9,13 @@ import "gwin"
 import vk "vendor:vulkan"
 
 GlowWindow :: struct {
-	id:        u32,
-	native:    ^gwin.WaylandWindow,
-	ren:       glowr.Renderer,
-	visible:   bool,
-	active:    bool,
-	timer:     time.Stopwatch,
-	frame_idx: u32,
+	id:          u32,
+	native:      ^gwin.WaylandWindow,
+	ren:         glowr.Renderer,
+	visible:     bool,
+	active:      bool,
+	timer:       time.Stopwatch,
+	frame_index: int,
 }
 
 create_window :: proc(ctx: ^gwin.WaylandContext, window_id: u32, win: ^GlowWindow) {
@@ -42,7 +42,13 @@ create_window :: proc(ctx: ^gwin.WaylandContext, window_id: u32, win: ^GlowWindo
 		g_ctx.vkc = glowr.create_vulkan_context(g_ctx.instance, surface)
 		glowr.create_resource_manager(&g_ctx.res, g_ctx.vkc, TARGET_WIDTH, TARGET_HEIGHT)
 	}
-	win.ren = glowr.create_renderer(g_ctx.vkc, surface, SWAPCHAIN_WIDTH, SWAPCHAIN_HEIGHT)
+	win.ren = glowr.create_renderer(
+		g_ctx.vkc,
+		&g_ctx.res,
+		surface,
+		SWAPCHAIN_WIDTH,
+		SWAPCHAIN_HEIGHT,
+	)
 	win.visible = true
 	win.active = true
 	time.stopwatch_start(&win.timer)

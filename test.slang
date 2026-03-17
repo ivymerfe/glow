@@ -10,9 +10,10 @@ struct PushConstants
     float aspect_ratio;
     float time;
     uint frame_idx;
-    uint base_idx;
+    uint pool_idx;
+    uint start_idx;
     uint prev_idx;
-    uint buf_count;
+    uint image_count;
 }
 
 [[vk::push_constant]]

@@ -65,7 +65,7 @@ compiler_proc :: proc(raw: rawptr) {
 		defer delete_cstring(source_c)
 
 		prog: glowr.Program
-		success := glowr.compile_program(&prog, &g_ctx.res, g_ctx.slang, path_c, source_c)
+		success := glowr.compile_program(&prog, &g_ctx.res, g_ctx.slang, path_c, source_c, 0)
 		if success {
 			glowr.program_buffer_set(request.buf, prog)
 			renderer_wakeup(&g_ctx.renderer)

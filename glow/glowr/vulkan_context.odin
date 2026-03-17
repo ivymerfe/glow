@@ -170,6 +170,7 @@ create_logical_device :: proc(vkc: ^VulkanContext, surface: vk.SurfaceKHR) {
 					dynamicRendering = true,
 				},
 				runtimeDescriptorArray = true,
+				descriptorBindingPartiallyBound = true,
 			},
 		},
 		pQueueCreateInfos       = &vk.DeviceQueueCreateInfo {
