@@ -26,6 +26,7 @@ program_buffer_get :: proc(swapper: ^ProgramBuffer) -> ^Program {
 	if sync.atomic_load(&swapper.should_swap) {
 		sync.lock(&swapper.swap_mutex)
 		if swapper.has_current {
+			inherit_program_state(&swapper.next, &swapper.current)
 			destroy_program(&swapper.current)
 		}
 		swapper.current = swapper.next

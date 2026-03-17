@@ -146,6 +146,10 @@ destroy_program :: proc(prog: ^Program) {
 	delete(prog.passes)
 }
 
+inherit_program_state :: proc(dest: ^Program, src: ^Program) {
+	dest.start_index = src.start_index
+}
+
 get_program_output :: proc(prog: ^Program) -> ^GlowImage {
 	return get_image(
 		prog.res,
