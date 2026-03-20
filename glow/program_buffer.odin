@@ -38,8 +38,8 @@ pbuf_update_source :: proc(pb: ^ProgramBuffer, path: string, source: string) {
 	sync.lock(&pb.source_mtx)
 	pb.path = path
 	pb.source = source
-	sync.atomic_store(&pb.recompile, true)
 	sync.unlock(&pb.source_mtx)
+	sync.atomic_store(&pb.recompile, true)
 }
 
 pbuf_should_recompile :: proc(pb: ^ProgramBuffer) -> bool {
