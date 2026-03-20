@@ -1,8 +1,6 @@
 package glow
 
 import "core:log"
-import "core:sync"
-import "core:time"
 
 import "glowr"
 import "gwin"
@@ -12,15 +10,16 @@ GlowWindow :: struct {
 	id:          u32,
 	native:      ^gwin.WaylandWindow,
 	ren:         glowr.Renderer,
+	pbuf:        ProgramBuffer,
+	res_index:   u32,
 	visible:     bool,
 	active:      bool,
-	timer:       time.Stopwatch,
 	frame_index: int,
 }
 
 create_window :: proc(ctx: ^gwin.WaylandContext, window_id: u32, win: ^GlowWindow) {
 	win.id = window_id
-	native, success := gwin.create_window(
+	native, wl_success := gwin.create_window(
 		ctx,
 		window_id,
 		"glow",
@@ -29,7 +28,7 @@ create_window :: proc(ctx: ^gwin.WaylandContext, window_id: u32, win: ^GlowWindo
 		SWAPCHAIN_WIDTH,
 		SWAPCHAIN_HEIGHT,
 	)
-	if !success {
+	if !wl_success {
 		log.panic("Failed to create Wayland window")
 	}
 	win.native = native
@@ -41,6 +40,7 @@ create_window :: proc(ctx: ^gwin.WaylandContext, window_id: u32, win: ^GlowWindo
 	if g_ctx.vkc == {} {
 		g_ctx.vkc = glowr.create_vulkan_context(g_ctx.instance, surface)
 		glowr.create_resource_manager(&g_ctx.res, g_ctx.vkc, TARGET_WIDTH, TARGET_HEIGHT)
+		g_ctx.index_allocator.max = glowr.MAX_IMAGES / IMAGES_PER_WINDOW
 	}
 	win.ren = glowr.create_renderer(
 		g_ctx.vkc,
@@ -49,31 +49,19 @@ create_window :: proc(ctx: ^gwin.WaylandContext, window_id: u32, win: ^GlowWindo
 		SWAPCHAIN_WIDTH,
 		SWAPCHAIN_HEIGHT,
 	)
+	res_index, res_success := alloc_index(&g_ctx.index_allocator)
+	if !res_success {
+		log.panic("Failed to allocate resource index for window")
+	}
+	win.res_index = res_index
 	win.visible = true
 	win.active = true
-	time.stopwatch_start(&win.timer)
 }
 
 destroy_window :: proc(win: ^GlowWindow) {
 	glowr.wait_renderer(&win.ren)
 	glowr.destroy_renderer(&win.ren)
 
+	free_index(&g_ctx.index_allocator, win.res_index)
 	gwin.destroy_window(win.native)
-}
-
-set_window_active :: proc(win: ^GlowWindow, active: bool) {
-	sync.atomic_store(&win.active, active)
-	if active {
-		time.stopwatch_start(&win.timer)
-	} else {
-		time.stopwatch_stop(&win.timer)
-	}
-}
-
-should_render :: proc(win: ^GlowWindow) -> bool {
-	return(
-		sync.atomic_load(&win.visible) &&
-		sync.atomic_load(&win.active) &&
-		sync.atomic_load(&win.ren.program_buf.ready) \
-	)
 }

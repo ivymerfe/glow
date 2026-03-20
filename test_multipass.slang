@@ -1,24 +1,24 @@
 import base;
 
-float3 avg3x3(uint2 coord)
+float3 avg3x3(int2 coord)
 {
     float3 col = float3(0.0, 0.0, 0.0);
     col += prev(coord);
-    col += prev(coord + uint2(-1, 0));
-    col += prev(coord + uint2(0, -1));
-    col += prev(coord + uint2(1, 0));
-    col += prev(coord + uint2(0, 1));
-    col += prev(coord + uint2(-1, -1));
-    col += prev(coord + uint2(-1, 1));
-    col += prev(coord + uint2(1, -1));
-    col += prev(coord + uint2(1, 1));
+    col += prev(coord + int2(-1, 0));
+    col += prev(coord + int2(0, -1));
+    col += prev(coord + int2(1, 0));
+    col += prev(coord + int2(0, 1));
+    col += prev(coord + int2(-1, -1));
+    col += prev(coord + int2(-1, 1));
+    col += prev(coord + int2(1, -1));
+    col += prev(coord + int2(1, 1));
     return col / 9.0;
 }
 
 [shader("pixel")]
 float4 pass_buffer(VertexOutput in) : SV_Target0
 {
-    uint2 coord = uint2(in.uv * float2(1920, 1080));
+    int2 coord = int2(in.uv * float2(1920, 1080));
     if (scene.frame_idx == 0)
     {
         float2 uv = in.uv;
@@ -45,12 +45,12 @@ float get_thickness(float3 col)
     return (col.r + col.g + col.b) / 2.0;
 }
 
-float3 get_normal(uint2 coord)
+float3 get_normal(int2 coord)
 {
-    float hx1 = get_thickness(read(0, coord + uint2(1, 0)));
-    float hx0 = get_thickness(read(0, coord + uint2(-1, 0)));
-    float hy1 = get_thickness(read(0, coord + uint2(0, 1)));
-    float hy0 = get_thickness(read(0, coord + uint2(0, -1)));
+    float hx1 = get_thickness(read(0, coord + int2(1, 0)));
+    float hx0 = get_thickness(read(0, coord + int2(-1, 0)));
+    float hy1 = get_thickness(read(0, coord + int2(0, 1)));
+    float hy0 = get_thickness(read(0, coord + int2(0, -1)));
     return normalize(float3(
         (hx0 - hx1) * 2.0,
         (hy0 - hy1) * 2.0,
@@ -68,7 +68,7 @@ float3 get_background(float3 rd)
 [shader("pixel")]
 float4 pass_draw(VertexOutput in) : SV_Target0
 {
-    uint2 coord = uint2(in.uv * float2(1920, 1080));
+    int2 coord = int2(in.uv * float2(1920, 1080));
     float3 ink = read(0, coord);
     float3 thickness = get_thickness(ink);
     float3 normal = get_normal(coord);

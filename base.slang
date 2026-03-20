@@ -4,10 +4,11 @@ struct PushConstants
     float4 camera_forward;
     float4 camera_right;
     float4 camera_up;
-    float2 mouse_pos;
-    uint2 mouse_data;
-    uint4 keyboard_down;
-    float aspect_ratio;
+    uint4 input_state;
+    float mouse_x;
+    float mouse_y;
+    float width;
+    float height;
     float time;
     uint frame_idx;
     uint pool_idx;
@@ -27,12 +28,14 @@ struct VertexOutput
     float2 uv : POS_UV;
 }
 
-float3 prev(uint2 coord)
+float3 prev(int2 coord)
 {
-    return images[scene.pool_idx + scene.prev_idx].Load(int2(coord.x, coord.y)).rgb;
+    return images[scene.pool_idx + scene.prev_idx].Load(coord).rgb;
 }
 
-float3 read(uint image, uint2 coord)
+float3 read(uint image, int2 coord)
 {
-    return images[scene.pool_idx + (scene.start_idx + image) % scene.image_count].Load(int2(coord.x, coord.y)).rgb;
+    uint idx = scene.start_idx + image;
+    uint wrapped = (idx >= scene.image_count) ? idx - scene.image_count : idx;
+    return images[scene.pool_idx + wrapped].Load(coord).rgb;
 }

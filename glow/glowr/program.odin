@@ -15,6 +15,7 @@ Program :: struct {
 	using vk_context: VulkanContext,
 	res:              ^ResourceManager,
 	passes:           []ProgramPass,
+	allocated:        bool,
 	pool_index:       u32,
 	start_index:      u32,
 	image_count:      u32,
@@ -133,17 +134,22 @@ compile_program :: proc(
 	vk.DestroyShaderModule(prog.device, shader, nil)
 
 	request_images(res, prog.pool_index, prog.image_count)
+	prog.allocated = true
 	success = true
 	return
 }
 
 destroy_program :: proc(prog: ^Program) {
+	if !prog.allocated {
+		return
+	}
 	for pass in prog.passes {
 		if pass.pipeline != {} {
 			vk.DestroyPipeline(prog.device, pass.pipeline, nil)
 		}
 	}
 	delete(prog.passes)
+	prog.allocated = false
 }
 
 inherit_program_state :: proc(dest: ^Program, src: ^Program) {

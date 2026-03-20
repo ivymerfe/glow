@@ -36,7 +36,6 @@ main :: proc() {
 	slang_init_time := time.duration_milliseconds(time.diff(vk_init_end, time.now()))
 	log.infof("Slang init -> %.2f ms", slang_init_time)
 
-	compiler_start(&g_ctx.compiler)
 	renderer_start(&g_ctx.renderer)
 
 	wayland_fd := gwin.get_display_fd(&g_ctx.wayland)
@@ -77,9 +76,8 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 		case xkb.XKB_KEY_v:
 			win := renderer_get_window(&g_ctx.renderer, native.id)
 			if win != nil {
-				sync.atomic_store(&win.visible, false)
-				gwin.set_window_visible(native, false)
-				msg_window_visible(native.id, false)
+				set_window_visible(win, false)
+				msg_window_visible(win.id, false)
 				send_messages()
 			}
 		case xkb.XKB_KEY_s:
@@ -104,11 +102,7 @@ command_handler :: proc(cmd_union: GlowCommand) {
 	case CmdWindowVisible:
 		win := renderer_get_window(&g_ctx.renderer, cmd.window_id)
 		if win != nil {
-			gwin.set_window_visible(win.native, cmd.visible)
-			sync.atomic_store(&win.visible, cmd.visible)
-			if cmd.visible {
-				renderer_wakeup(&g_ctx.renderer)
-			}
+			set_window_visible(win, cmd.visible)
 		}
 	case CmdWindowToggleFullscreen:
 		win := renderer_get_window(&g_ctx.renderer, cmd.window_id)
@@ -118,18 +112,15 @@ command_handler :: proc(cmd_union: GlowCommand) {
 	case CmdWindowProgram:
 		win := renderer_get_window(&g_ctx.renderer, cmd.window_id)
 		if win != nil {
-			req := CompileRequest {
-				buf    = &win.ren.program_buf,
-				path   = transmute(string)cmd.path,
-				source = transmute(string)cmd.source,
-			}
-			compiler_submit(&g_ctx.compiler, req)
+			path := transmute(string)cmd.path
+			source := transmute(string)cmd.source
+			pbuf_update_source(&win.pbuf, path, source)
+			compiler_wakeup(&g_ctx.renderer)
 		}
 	}
 }
 
 shutdown :: proc() {
-	compiler_stop(&g_ctx.compiler)
 	renderer_stop(&g_ctx.renderer)
 
 	if g_ctx.vkc.device != {} {

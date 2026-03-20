@@ -1,7 +1,6 @@
 package glowr
 
 import "core:log"
-import "core:sync"
 import vk "vendor:vulkan"
 
 Swapchain :: struct {
@@ -26,7 +25,6 @@ Renderer :: struct {
 	cmd_buffer:                 vk.CommandBuffer,
 	render_fence:               vk.Fence,
 	res:                        ^ResourceManager,
-	program_buf:                ProgramBuffer,
 }
 
 PushConstants :: struct {
@@ -34,10 +32,11 @@ PushConstants :: struct {
 	camera_forward: [4]f32,
 	camera_right:   [4]f32,
 	camera_up:      [4]f32,
-	mouse_pos:      [2]f32,
-	mouse_data:     [2]u32,
-	keyboard_down:  [4]u32,
-	aspect_ratio:   f32,
+	input_state:    [4]u32,
+	mouse_x:        f32,
+	mouse_y:        f32,
+	width:          f32,
+	height:         f32,
 	time:           f32,
 	frame_index:    u32,
 	pool_index:     u32,
@@ -132,15 +131,11 @@ resize_swapchain :: proc(ren: ^Renderer, new_width: int, new_height: int) {
 	recreate_swapchain(ren)
 }
 
-render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
+render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> bool {
 	fence_status := vk.GetFenceStatus(ren.device, ren.render_fence)
 	if fence_status == .NOT_READY {
 		return false
 	}
-	if !sync.atomic_load(&ren.program_buf.ready) {
-		return false
-	}
-	prog := program_buffer_get(&ren.program_buf)
 	swapchain := ren.swapchain
 
 	sem_image_available := ren.image_available_semaphore
@@ -166,12 +161,12 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 
 	swapchain_image := swapchain.images[image_index]
 
-	cmd_buffer := ren.cmd_buffer
-	vk.ResetCommandBuffer(cmd_buffer, {})
+	cmd := ren.cmd_buffer
+	vk.ResetCommandBuffer(cmd, {})
 	begin_info := vk.CommandBufferBeginInfo {
 		sType = .COMMAND_BUFFER_BEGIN_INFO,
 	}
-	vk.BeginCommandBuffer(cmd_buffer, &begin_info)
+	vk.BeginCommandBuffer(cmd, &begin_info)
 
 	width := render_info.width
 	height := render_info.height
@@ -183,16 +178,16 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 		minDepth = 0.0,
 		maxDepth = 1.0,
 	}
-	vk.CmdSetViewport(cmd_buffer, 0, 1, &viewport)
+	vk.CmdSetViewport(cmd, 0, 1, &viewport)
 
 	scissor := vk.Rect2D {
 		offset = vk.Offset2D{x = 0, y = 0},
 		extent = vk.Extent2D{width = u32(width), height = u32(height)},
 	}
-	vk.CmdSetScissor(cmd_buffer, 0, 1, &scissor)
+	vk.CmdSetScissor(cmd, 0, 1, &scissor)
 
 	vk.CmdBindDescriptorSets(
-		cmd_buffer,
+		cmd,
 		.GRAPHICS,
 		ren.res.pipeline_layout,
 		0,
@@ -202,16 +197,16 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 		nil,
 	)
 
-	draw_program(prog, cmd_buffer, render_info)
-	target := get_program_output(prog)
+	draw_program(program, cmd, render_info)
+	target := get_program_output(program)
 	if target == nil {
 		log.panic("no program output")
 	}
 
-	transition_image(cmd_buffer, target, .TRANSFER_SRC_OPTIMAL, {.TRANSFER}, {.TRANSFER_READ})
+	transition_image(cmd, target, .TRANSFER_SRC_OPTIMAL, {.TRANSFER}, {.TRANSFER_READ})
 
 	transition_image_layout(
-		cmd_buffer,
+		cmd,
 		swapchain_image,
 		.UNDEFINED,
 		.TRANSFER_DST_OPTIMAL,
@@ -238,7 +233,7 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 		},
 	}
 	vk.CmdBlitImage(
-		cmd_buffer,
+		cmd,
 		target.image,
 		.TRANSFER_SRC_OPTIMAL,
 		swapchain_image,
@@ -247,10 +242,10 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 		&copy_region,
 		.LINEAR,
 	)
-	transition_image(cmd_buffer, target, .GENERAL, {.FRAGMENT_SHADER}, {.SHADER_READ})
+	transition_image(cmd, target, .GENERAL, {.FRAGMENT_SHADER}, {.SHADER_READ})
 
 	transition_image_layout(
-		cmd_buffer,
+		cmd,
 		swapchain_image,
 		.TRANSFER_DST_OPTIMAL,
 		.PRESENT_SRC_KHR,
@@ -260,7 +255,7 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 		{},
 		{.COLOR},
 	)
-	vk.EndCommandBuffer(cmd_buffer)
+	vk.EndCommandBuffer(cmd)
 
 	sem_render_finished := ren.render_finished_semaphores[image_index]
 	submit_info := vk.SubmitInfo {
@@ -269,7 +264,7 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo) -> bool {
 		pWaitSemaphores      = &sem_image_available,
 		pWaitDstStageMask    = &vk.PipelineStageFlags{.TRANSFER},
 		commandBufferCount   = 1,
-		pCommandBuffers      = &cmd_buffer,
+		pCommandBuffers      = &cmd,
 		signalSemaphoreCount = 1,
 		pSignalSemaphores    = &sem_render_finished,
 	}
