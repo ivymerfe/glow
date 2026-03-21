@@ -100,7 +100,9 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 			on_window_input(win, key, false)
 		}
 	case gwin.EventKeyboardLeave:
-		on_window_leave(win)
+		on_window_keyboard_leave(win)
+	case gwin.EventPointerEnter:
+		on_window_pointer_enter(win, event.x, event.y)
 	case gwin.EventPointerMotion:
 		on_window_pointer_motion(win, event.x, event.y)
 	case gwin.EventPointerRelative:

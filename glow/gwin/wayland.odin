@@ -29,6 +29,11 @@ EventKeyUp :: struct {
 
 EventKeyboardLeave :: struct {}
 
+EventPointerEnter :: struct {
+	x: f32,
+	y: f32,
+}
+
 EventPointerMotion :: struct {
 	x: f32,
 	y: f32,
@@ -60,6 +65,7 @@ WindowEvent :: union {
 	EventKeyDown,
 	EventKeyUp,
 	EventKeyboardLeave,
+	EventPointerEnter,
 	EventPointerMotion,
 	EventPointerRelative,
 	EventPointerButton,
@@ -476,6 +482,13 @@ pointer_enter :: proc "c" (
 	context = ctx.app_context
 	ctx.focused_pointer_window = ctx.surface_to_window[surface]
 	ctx.last_pointer_serial = serial
+
+	if ctx.focused_pointer_window != nil {
+		ctx.event_handler(
+			ctx.focused_pointer_window,
+			EventPointerEnter{x = f32(sx) / 256.0, y = f32(sy) / 256.0},
+		)
+	}
 
 	if ctx.focused_pointer_window != nil && ctx.focused_pointer_window.pointer_locked {
 		wl.pointer_set_cursor(pointer, serial, nil, 0, 0)

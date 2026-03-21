@@ -96,8 +96,8 @@ set_window_active :: proc(win: ^GlowWindow, active: bool) {
 
 set_window_fullscreen :: proc(win: ^GlowWindow, fullscreen: bool) {
 	gwin.set_window_fullscreen(win.native, fullscreen)
-	if win.pbuf.prog.camera_supported {
-		set_camera_active(win, fullscreen)
+	if !fullscreen {
+		set_camera_active(win, false)
 	}
 }
 
@@ -121,28 +121,34 @@ on_window_input :: proc(win: ^GlowWindow, key: u32, pressed: bool) {
 		win.input[idx] &= ~mask
 	}
 
-	if win.is_camera_active {
-		dir: f32 = pressed ? 1 : -1
-		switch key {
-		case KEY_W:
-			win.camera_movement[0] += dir
-		case KEY_S:
-			win.camera_movement[0] -= dir
-		case KEY_SPACE:
-			win.camera_movement[1] += dir
-		case KEY_LEFT_SHIFT:
-			win.camera_movement[1] -= dir
-		case KEY_D:
-			win.camera_movement[2] += dir
-		case KEY_A:
-			win.camera_movement[2] -= dir
-		}
+	dir: f32 = pressed ? 1 : -1
+	switch key {
+	case KEY_W:
+		win.camera_movement[0] += dir
+	case KEY_S:
+		win.camera_movement[0] -= dir
+	case KEY_SPACE:
+		win.camera_movement[1] += dir
+	case KEY_LEFT_SHIFT:
+		win.camera_movement[1] -= dir
+	case KEY_D:
+		win.camera_movement[2] += dir
+	case KEY_A:
+		win.camera_movement[2] -= dir
 	}
 }
 
-on_window_leave :: proc(win: ^GlowWindow) {
+on_window_keyboard_leave :: proc(win: ^GlowWindow) {
 	win.input = [4]u32{}
 	win.camera_movement = [3]f32{}
+}
+
+on_window_pointer_enter :: proc(win: ^GlowWindow, x: f32, y: f32) {
+	win.mouse_x = x / f32(win.native.width)
+	win.mouse_y = y / f32(win.native.height)
+	if win.native.fullscreen && win.pbuf.prog.camera_supported {
+		set_camera_active(win, true)
+	}
 }
 
 on_window_pointer_motion :: proc(win: ^GlowWindow, x: f32, y: f32) {
@@ -209,6 +215,9 @@ get_window_constants :: proc(win: ^GlowWindow, time: f32) -> glowr.PushConstants
 }
 
 tick_window_input :: proc(win: ^GlowWindow, time: f32) {
+	if !win.is_camera_active {
+		return
+	}
 	x_forward := math.sin(win.yaw)
 	z_forward := math.cos(win.yaw)
 
