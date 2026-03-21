@@ -1,5 +1,6 @@
 package glow
 
+import "core:log"
 import "core:sync"
 import "core:thread"
 import "core:time"
@@ -11,7 +12,7 @@ GlowRenderer :: struct {
 	windows:         map[u32]^GlowWindow,
 	timer:           time.Stopwatch,
 	render_thread:   ^thread.Thread,
-	render_mtx:      sync.Mutex,
+	mtx:             sync.RW_Mutex,
 	render_signal:   sync.Auto_Reset_Event,
 	compiler_thread: ^thread.Thread,
 	compiler_signal: sync.Auto_Reset_Event,
@@ -41,14 +42,6 @@ compiler_wakeup :: proc(r: ^GlowRenderer) {
 	sync.auto_reset_event_signal(&r.compiler_signal)
 }
 
-renderer_lock :: proc(r: ^GlowRenderer) {
-	sync.lock(&r.render_mtx)
-}
-
-renderer_unlock :: proc(r: ^GlowRenderer) {
-	sync.unlock(&r.render_mtx)
-}
-
 renderer_new_window :: proc(r: ^GlowRenderer, window_id: u32) {
 	_, ok := r.windows[window_id]
 	if ok {
@@ -57,9 +50,9 @@ renderer_new_window :: proc(r: ^GlowRenderer, window_id: u32) {
 	win := new(GlowWindow)
 	create_window(&g_ctx.wayland, window_id, win)
 
-	renderer_lock(r)
+	sync.lock(&r.mtx)
 	r.windows[window_id] = win
-	renderer_unlock(r)
+	sync.unlock(&r.mtx)
 }
 
 renderer_destroy_window :: proc(r: ^GlowRenderer, window_id: u32) {
@@ -67,10 +60,10 @@ renderer_destroy_window :: proc(r: ^GlowRenderer, window_id: u32) {
 	if win == nil {
 		return
 	}
-	renderer_lock(r)
+	sync.lock(&r.mtx)
 	destroy_window(win)
 	delete_key(&r.windows, window_id)
-	renderer_unlock(r)
+	sync.unlock(&r.mtx)
 	free(win)
 }
 
@@ -79,40 +72,45 @@ renderer_get_window :: proc(r: ^GlowRenderer, window_id: u32) -> ^GlowWindow {
 }
 
 renderer_destroy_all_windows :: proc(r: ^GlowRenderer) {
-	renderer_lock(r)
+	sync.lock(&r.mtx)
 	for _, win in r.windows {
 		destroy_window(win)
 	}
 	clear(&r.windows)
-	renderer_unlock(r)
-}
-
-should_render :: proc(win: ^GlowWindow) -> bool {
-	return sync.atomic_load(&win.visible) && sync.atomic_load(&win.active)
+	sync.unlock(&r.mtx)
 }
 
 render_window :: proc(r: ^GlowRenderer, win: ^GlowWindow) -> bool {
 	pbuf_render_done(&win.pbuf)
-	prog := pbuf_get_current(&win.pbuf)
+	prog := &win.pbuf.prog
+	if !prog.allocated {
+		log.panic("Attempted to render with unallocated program")
+	}
 	current_time := f32(time.duration_seconds(time.stopwatch_duration(r.timer)))
-	if should_render(win) && prog.allocated {
-		tick_window_input(win, current_time)
-		constants := get_window_constants(win, current_time)
-		width := f32(win.native.width) * win.native.scale
-		height := f32(win.native.height) * win.native.scale
-		render_info := glowr.RenderInfo {
-			width      = u32(TARGET_WIDTH),
-			height     = u32(TARGET_HEIGHT),
-			dst_width  = u32(width),
-			dst_height = u32(height),
-			constants  = constants,
-		}
-		if glowr.render(&win.ren, &render_info, prog) {
-			win.frame_index += 1
-			return true
-		}
+	tick_window_input(win, current_time)
+	constants := get_window_constants(win, current_time)
+	width := f32(win.native.width) * win.native.scale
+	height := f32(win.native.height) * win.native.scale
+	render_info := glowr.RenderInfo {
+		width      = u32(TARGET_WIDTH),
+		height     = u32(TARGET_HEIGHT),
+		dst_width  = u32(width),
+		dst_height = u32(height),
+		constants  = constants,
+	}
+	if glowr.render(&win.ren, &render_info, prog) {
+		win.frame_index += 1
+		return true
 	}
 	return false
+}
+
+should_render :: proc(win: ^GlowWindow) -> bool {
+	return(
+		sync.atomic_load(&win.visible) &&
+		sync.atomic_load(&win.active) &&
+		sync.atomic_load(&win.pbuf.ready) \
+	)
 }
 
 render_proc :: proc(raw: rawptr) {
@@ -122,13 +120,13 @@ render_proc :: proc(raw: rawptr) {
 	fences := make([dynamic]vk.Fence)
 	for !sync.atomic_load(&r.stop) {
 		clear(&fences)
-		renderer_lock(r)
+		sync.shared_lock(&r.mtx)
 		for _, win in r.windows {
 			if should_render(win) {
 				append(&fences, win.ren.render_fence)
 			}
 		}
-		renderer_unlock(r)
+		sync.shared_unlock(&r.mtx)
 
 		rendered := false
 		if len(fences) > 0 {
@@ -141,12 +139,14 @@ render_proc :: proc(raw: rawptr) {
 					max(u64),
 				),
 			)
-			renderer_lock(r)
+			sync.shared_lock(&r.mtx)
 			glowr.prepare_resources(&g_ctx.res)
 			for _, win in r.windows {
-				rendered |= render_window(r, win)
+				if should_render(win) && glowr.is_renderer_ready(&win.ren) {
+					rendered |= render_window(r, win)
+				}
 			}
-			renderer_unlock(r)
+			sync.shared_unlock(&r.mtx)
 		}
 		if !rendered {
 			sync.auto_reset_event_wait(&r.render_signal)
@@ -162,24 +162,25 @@ compiler_proc :: proc(raw: rawptr) {
 		if sync.atomic_load(&r.stop) {
 			break
 		}
+		sync.shared_lock(&r.mtx)
 		for _, win in r.windows {
 			if pbuf_should_recompile(&win.pbuf) {
-				path, source := pbuf_get_source(&win.pbuf)
-				next := pbuf_get_next(&win.pbuf)
-				glowr.destroy_program(next)
+				path, source, version := pbuf_get_source(&win.pbuf)
+				prog: glowr.Program
 				success := glowr.compile_program(
-					next,
+					&prog,
 					&g_ctx.res,
 					g_ctx.slang,
 					path,
 					source,
 					win.res_index * IMAGES_PER_WINDOW,
 				)
-				pbuf_compile_done(&win.pbuf, success)
+				pbuf_compile_done(&win.pbuf, success, prog, version)
 				if success {
 					renderer_wakeup(r)
 				}
 			}
 		}
+		sync.shared_unlock(&r.mtx)
 	}
 }

@@ -96,8 +96,7 @@ set_window_active :: proc(win: ^GlowWindow, active: bool) {
 
 set_window_fullscreen :: proc(win: ^GlowWindow, fullscreen: bool) {
 	gwin.set_window_fullscreen(win.native, fullscreen)
-	prog := pbuf_get_current(&win.pbuf)
-	if prog.camera_supported {
+	if win.pbuf.prog.camera_supported {
 		set_camera_active(win, fullscreen)
 	}
 }
@@ -109,8 +108,7 @@ set_camera_active :: proc(win: ^GlowWindow, active: bool) {
 
 on_window_input :: proc(win: ^GlowWindow, key: u32, pressed: bool) {
 	if key == KEY_MOUSE_RIGHT && pressed {
-		prog := pbuf_get_current(&win.pbuf)
-		if prog.camera_supported {
+		if win.pbuf.prog.camera_supported {
 			set_camera_active(win, !win.is_camera_active)
 			return
 		}

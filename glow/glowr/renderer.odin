@@ -131,11 +131,12 @@ resize_swapchain :: proc(ren: ^Renderer, new_width: int, new_height: int) {
 	recreate_swapchain(ren)
 }
 
-render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> bool {
+is_renderer_ready :: proc(ren: ^Renderer) -> bool {
 	fence_status := vk.GetFenceStatus(ren.device, ren.render_fence)
-	if fence_status == .NOT_READY {
-		return false
-	}
+	return fence_status == .SUCCESS
+}
+
+render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> bool {
 	swapchain := ren.swapchain
 
 	sem_image_available := ren.image_available_semaphore
