@@ -19,17 +19,17 @@ GlowWindow :: struct {
 	res_index:        u32,
 	visible:          bool,
 	active:           bool,
-	last_update_time: f32,
-	is_camera_active: bool,
-	camera_pos:       [4]f32,
-	camera_speed:     f32,
-	camera_movement:  [4]f32,
-	yaw:              f32,
-	pitch:            f32,
+	frame_index:      int,
 	mouse_x:          f32,
 	mouse_y:          f32,
 	input:            [4]u32,
-	frame_index:      int,
+	is_camera_active: bool,
+	camera_pos:       [3]f32,
+	yaw:              f32,
+	pitch:            f32,
+	camera_speed:     f32,
+	camera_movement:  [3]f32,
+	last_update_time: f32,
 }
 
 create_window :: proc(ctx: ^gwin.WaylandContext, window_id: u32, win: ^GlowWindow) {
@@ -142,7 +142,7 @@ on_window_input :: proc(win: ^GlowWindow, key: u32, pressed: bool) {
 
 on_window_leave :: proc(win: ^GlowWindow) {
 	win.input = [4]u32{}
-	win.camera_movement = [4]f32{}
+	win.camera_movement = [3]f32{}
 }
 
 on_window_pointer_motion :: proc(win: ^GlowWindow, x: f32, y: f32) {
@@ -189,16 +189,16 @@ get_window_constants :: proc(win: ^GlowWindow, time: f32) -> glowr.PushConstants
 	ps := math.sin(win.pitch)
 	pc := math.cos(win.pitch)
 
-	forward := [4]f32{ys * pc, ps, yc * pc, 0}
-	right := [4]f32{yc, 0, -ys, 0}
-	up := [4]f32{-ys * ps, pc, -yc * ps, 0}
+	forward := [3]f32{ys * pc, ps, yc * pc}
+	right := [3]f32{yc, 0, -ys}
+	up := [3]f32{-ys * ps, pc, -yc * ps}
 
 	return glowr.PushConstants {
-		camera_pos = win.camera_pos,
-		camera_forward = forward,
-		camera_right = right,
-		camera_up = up,
-		input_state = win.input,
+		position = win.camera_pos,
+		forward = forward,
+		right = right,
+		up = up,
+		input = win.input,
 		mouse_x = win.mouse_x,
 		mouse_y = win.mouse_y,
 		width = TARGET_WIDTH,

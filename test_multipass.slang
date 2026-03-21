@@ -3,15 +3,15 @@ import base;
 float3 avg3x3(int2 coord)
 {
     float3 col = float3(0.0, 0.0, 0.0);
-    col += prev(coord);
-    col += prev(coord + int2(-1, 0));
-    col += prev(coord + int2(0, -1));
-    col += prev(coord + int2(1, 0));
-    col += prev(coord + int2(0, 1));
-    col += prev(coord + int2(-1, -1));
-    col += prev(coord + int2(-1, 1));
-    col += prev(coord + int2(1, -1));
-    col += prev(coord + int2(1, 1));
+    col += readPrev(coord);
+    col += readPrev(coord + int2(-1, 0));
+    col += readPrev(coord + int2(0, -1));
+    col += readPrev(coord + int2(1, 0));
+    col += readPrev(coord + int2(0, 1));
+    col += readPrev(coord + int2(-1, -1));
+    col += readPrev(coord + int2(-1, 1));
+    col += readPrev(coord + int2(1, -1));
+    col += readPrev(coord + int2(1, 1));
     return col / 9.0;
 }
 
@@ -58,10 +58,10 @@ float get_thickness(float3 col)
 
 float3 get_normal(int2 coord)
 {
-    float hx1 = get_thickness(read(0, coord + int2(1, 0)));
-    float hx0 = get_thickness(read(0, coord + int2(-1, 0)));
-    float hy1 = get_thickness(read(0, coord + int2(0, 1)));
-    float hy0 = get_thickness(read(0, coord + int2(0, -1)));
+    float hx1 = get_thickness(readImage(0, coord + int2(1, 0)));
+    float hx0 = get_thickness(readImage(0, coord + int2(-1, 0)));
+    float hy1 = get_thickness(readImage(0, coord + int2(0, 1)));
+    float hy0 = get_thickness(readImage(0, coord + int2(0, -1)));
     return normalize(float3(
         (hx0 - hx1) * 2.0,
         (hy0 - hy1) * 2.0,
@@ -80,7 +80,7 @@ float3 get_background(float3 rd)
 float4 pass_draw(VertexOutput in) : SV_Target0
 {
     int2 coord = int2(in.uv * scene.resolution);
-    float3 ink = read(0, coord);
+    float3 ink = readImage(0, coord);
     float3 thickness = get_thickness(ink);
     float3 normal = get_normal(coord);
     float3 light_dir = normalize(float3(0.5, 0.7, -0.8));

@@ -1,15 +1,15 @@
 struct PushConstants
 {
-    float4 camera_pos;
-    float4 camera_forward;
-    float4 camera_right;
-    float4 camera_up;
-    uint[4] input_state;
-    float2 mouse;
     float2 resolution;
+    float2 mouse;
+    uint[4] input;
+    float3 position;
     float time;
+    float3 forward;
     uint frame_idx;
+    float3 right;
     uint pool_idx;
+    float3 up;
     uint start_idx;
     uint prev_idx;
     uint image_count;
@@ -26,12 +26,12 @@ struct VertexOutput
     float2 uv : POS_UV;
 }
 
-float3 prev(int2 coord)
+float3 readPrev(int2 coord)
 {
     return images[scene.pool_idx + scene.prev_idx].Load(coord).rgb;
 }
 
-float3 read(uint image, int2 coord)
+float3 readImage(uint image, int2 coord)
 {
     uint idx = scene.start_idx + image;
     uint wrapped = (idx >= scene.image_count) ? idx - scene.image_count : idx;
@@ -42,7 +42,7 @@ bool isPressed(uint key)
 {
     uint idx = key >> 5;
     uint bit = key & 31;
-    return (scene.input_state[idx] & (1 << bit)) != 0;
+    return (scene.input[idx] & (1 << bit)) != 0;
 }
 
 static const uint KEY_MOUSE_LEFT = 0;

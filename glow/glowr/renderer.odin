@@ -28,21 +28,21 @@ Renderer :: struct {
 }
 
 PushConstants :: struct {
-	camera_pos:     [4]f32,
-	camera_forward: [4]f32,
-	camera_right:   [4]f32,
-	camera_up:      [4]f32,
-	input_state:    [4]u32,
-	mouse_x:        f32,
-	mouse_y:        f32,
-	width:          f32,
-	height:         f32,
-	time:           f32,
-	frame_index:    u32,
-	pool_index:     u32,
-	start_index:    u32,
-	prev_index:     u32,
-	image_count:    u32,
+	width:       f32,
+	height:      f32,
+	mouse_x:     f32,
+	mouse_y:     f32,
+	input:       [4]u32,
+	position:    [3]f32,
+	time:        f32,
+	forward:     [3]f32,
+	frame_index: u32,
+	right:       [3]f32,
+	pool_index:  u32,
+	up:          [3]f32,
+	start_index: u32,
+	prev_index:  u32,
+	image_count: u32,
 }
 
 RenderInfo :: struct {

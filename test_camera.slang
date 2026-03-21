@@ -1,24 +1,21 @@
 // +camera
+// source: https://www.shadertoy.com/view/Ms2SD1 - Seascape by TDM
 import base;
 
 const static int NUM_STEPS = 32;
 const static float PI = 3.141592;
 const static float EPSILON = 1e-3;
 
-// sea parameters
 const static int ITER_GEOMETRY = 3;
 const static int ITER_FRAGMENT = 5;
-const static float SEA_HEIGHT = 0.8;
-const static float SEA_CHOPPY = 6.0;
+const static float SEA_HEIGHT = 1.0;
+const static float SEA_CHOPPY = 1.5;
 const static float SEA_SPEED = 1.2;
 const static float SEA_FREQ = 0.16;
 const static float3 SEA_BASE = float3(0.0, 0.1, 0.2);
 const static float3 SEA_WATER_COLOR = float3(0.1, 0.9, 0.6) * 0.6;
 const static float2x2 octave_m = float2x2(1.6, 1.2, -1.2, 1.6);
 
-// -----------------------------------
-// Math Helpers
-// -----------------------------------
 float hash(float2 p)
 {
     float h = dot(p, float2(127.1, 311.7));
@@ -36,9 +33,6 @@ float noise(float2 p)
                             u.y);
 }
 
-// -----------------------------------
-// Sea functions
-// -----------------------------------
 float sea_octave(float2 uv, float choppy)
 {
     uv += noise(uv);
@@ -94,9 +88,6 @@ float map_detailed(float3 p, float time)
     return p.y - h;
 }
 
-// -----------------------------------
-// Lighting helpers
-// -----------------------------------
 float diffuse(float3 n, float3 l, float p)
 {
     return pow(dot(n, l) * 0.4 + 0.6, p);
@@ -130,9 +121,6 @@ float3 getSeaColor(float3 p, float3 n, float3 l, float3 eye, float3 dist)
     return color;
 }
 
-// -----------------------------------
-// Normal & height map tracing
-// -----------------------------------
 float3 getNormal(float3 p, float eps, float time)
 {
     float3 n;
@@ -176,9 +164,6 @@ float heightMapTracing(float3 ori, float3 dir, out float3 p, float time)
     return lerp(tm, tx, hm / (hm - hx));
 }
 
-// -----------------------------------
-// Pixel shader
-// -----------------------------------
 [shader("pixel")]
 float4 pass(VertexOutput in) : SV_Target0
 {
@@ -188,25 +173,20 @@ float4 pass(VertexOutput in) : SV_Target0
 
     float time = scene.time;
 
-    float3 ori = scene.camera_pos.xyz;
+    float3 ori = scene.position;
     ori.y += 10;
-    float3 dir = normalize(scene.camera_right * uv.x + scene.camera_up * uv.y + scene.camera_forward * 1.5).xyz;
+    float3 dir = normalize(scene.right * uv.x + scene.up * uv.y + scene.forward * 1.5).xyz;
 
-    // Trace
     float3 p;
     heightMapTracing(ori, dir, p, time);
     float3 dist = p - ori;
     float3 n = getNormal(p, dot(dist, dist) * (0.1 / scene.resolution.x), time);
     float3 light = normalize(float3(0.0, 1.0, 0.8));
 
-    // Color
     float3 col = lerp(
         getSkyColor(dir),
         getSeaColor(p, n, light, dir, dist),
         pow(smoothstep(0.0, -0.02, dir.y), 0.2));
-
-    // Post gamma
-    col = pow(col, float3(0.65));
 
     return float4(pow(col, 2.2), 1.0);
 }
