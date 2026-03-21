@@ -81,6 +81,8 @@ WaylandContext :: struct {
 	pointer_constraints:      ^wl.pointer_constraints_v1,
 	viewporter:               ^wl.viewporter,
 	fractional_scale_manager: ^wl.fractional_scale_manager_v1,
+	cursor_shape_manager:     ^wl.cursor_shape_manager_v1,
+	cursor_shape_device:      ^wl.cursor_shape_device_v1,
 	surface_to_window:        map[^wl.surface]^WaylandWindow,
 	focused_window:           ^WaylandWindow,
 	focused_pointer_window:   ^WaylandWindow,
@@ -229,6 +231,13 @@ registry_global :: proc "c" (
 			&wl.fractional_scale_manager_v1_interface,
 			1,
 		)
+	} else if interface == wl.cursor_shape_manager_v1_interface.name {
+		ctx.cursor_shape_manager = cast(^wl.cursor_shape_manager_v1)wl.registry_bind(
+			registry,
+			name,
+			&wl.cursor_shape_manager_v1_interface,
+			1,
+		)
 	}
 }
 
@@ -307,6 +316,14 @@ seat_capabilities :: proc "c" (data: rawptr, seat_ptr: ^wl.seat, caps: wl.seat_c
 		if ctx.pointer == nil {
 			ctx.pointer = wl.seat_get_pointer(seat_ptr)
 			wl.pointer_add_listener(ctx.pointer, &pointer_listener, data)
+			
+			if ctx.cursor_shape_manager != nil {
+				ctx.cursor_shape_device = wl.cursor_shape_manager_v1_get_pointer(
+					ctx.cursor_shape_manager,
+					ctx.pointer,
+				)
+			}
+
 			if ctx.relative_pointer_manager != nil {
 				ctx.relative_pointer = wl.relative_pointer_manager_v1_get_relative_pointer(
 					ctx.relative_pointer_manager,
@@ -455,6 +472,12 @@ pointer_enter :: proc "c" (
 
 	if ctx.focused_pointer_window != nil && ctx.focused_pointer_window.pointer_locked {
 		wl.pointer_set_cursor(pointer, serial, nil, 0, 0)
+	} else if ctx.cursor_shape_device != nil {
+		wl.cursor_shape_device_v1_set_shape(
+			ctx.cursor_shape_device,
+			serial,
+			u32(wl.cursor_shape_v1_shape.default),
+		)
 	}
 }
 
@@ -696,6 +719,12 @@ destroy_wayland_context :: proc(ctx: ^WaylandContext) {
 	}
 	if ctx.pointer_constraints != nil {
 		wl.pointer_constraints_v1_destroy(ctx.pointer_constraints)
+	}
+	if ctx.cursor_shape_device != nil {
+		wl.cursor_shape_device_v1_destroy(ctx.cursor_shape_device)
+	}
+	if ctx.cursor_shape_manager != nil {
+		wl.cursor_shape_manager_v1_destroy(ctx.cursor_shape_manager)
 	}
 	if ctx.seat != nil {
 		wl.seat_destroy(ctx.seat)
@@ -978,5 +1007,12 @@ set_window_pointer_lock :: proc(win: ^WaylandWindow, lock: bool) {
 			win.locked_pointer = nil
 		}
 		win.pointer_locked = false
+		if ctx.cursor_shape_device != nil && ctx.last_pointer_serial != 0 {
+			wl.cursor_shape_device_v1_set_shape(
+				ctx.cursor_shape_device,
+				ctx.last_pointer_serial,
+				u32(wl.cursor_shape_v1_shape.default),
+			)
+		}
 	}
 }

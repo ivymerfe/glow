@@ -9,6 +9,16 @@ pointer_constraints_types := []^interface {
 	&surface_interface,
 	&pointer_interface,
 	&region_interface,
+	&locked_pointer_v1_interface,
+	&surface_interface,
+	&pointer_interface,
+	&region_interface,
+	nil,
+	&confined_pointer_v1_interface,
+	&surface_interface,
+	&pointer_interface,
+	&region_interface,
+	nil,
 }
 
 pointer_constraints_v1 :: struct {}
@@ -69,8 +79,8 @@ pointer_constraints_v1_lifetime :: enum {
 @(private)
 pointer_constraints_v1_requests := []message {
 	{"destroy", "", raw_data(pointer_constraints_types)[0:]},
-	{"lock_pointer", "noou", raw_data(pointer_constraints_types)[1:]},
-	{"confine_pointer", "noou", raw_data(pointer_constraints_types)[2:]},
+	{"lock_pointer", "noo?ou", raw_data(pointer_constraints_types)[6:]},
+	{"confine_pointer", "noo?ou", raw_data(pointer_constraints_types)[11:]},
 }
 
 pointer_constraints_v1_interface : interface
