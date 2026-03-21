@@ -105,6 +105,7 @@ should_render :: proc(win: ^GlowWindow) -> bool {
 }
 
 render_window :: proc(r: ^GlowRenderer, win: ^GlowWindow) -> bool {
+	pbuf_render_done(&win.pbuf)
 	prog := pbuf_get_current(&win.pbuf)
 	if should_render(win) && prog.allocated {
 		width := f32(win.native.width) * win.native.scale
@@ -193,10 +194,8 @@ compiler_proc :: proc(raw: rawptr) {
 					source_c,
 					win.res_index * IMAGES_PER_WINDOW,
 				)
+				pbuf_compile_done(&win.pbuf, success)
 				if success {
-					curr := pbuf_get_current(&win.pbuf)
-					glowr.inherit_program_state(next, curr)
-					pbuf_swap(&win.pbuf)
 					renderer_wakeup(r)
 				}
 			}
