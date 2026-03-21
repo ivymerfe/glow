@@ -42,6 +42,11 @@ EventPointerButton :: struct {
 	pressed: bool,
 }
 
+EventPointerScroll :: struct {
+	dx: f32,
+	dy: f32,
+}
+
 EventWindowClose :: struct {}
 
 EventWindowResize :: struct {
@@ -55,6 +60,7 @@ WindowEvent :: union {
 	EventPointerMotion,
 	EventPointerRelative,
 	EventPointerButton,
+	EventPointerScroll,
 	EventWindowClose,
 	EventWindowResize,
 }
@@ -79,6 +85,8 @@ WaylandContext :: struct {
 	focused_window:           ^WaylandWindow,
 	focused_pointer_window:   ^WaylandWindow,
 	last_pointer_serial:      uint,
+	axis_discrete_x:          int,
+	axis_discrete_y:          int,
 	kb_context:               xkb.KeyboardContext,
 	event_handler:            WindowEventHandler,
 }
@@ -545,7 +553,36 @@ pointer_axis :: proc "c" (
 	time: uint,
 	axis: wl.pointer_axis,
 	value: i32,
-) {}
+) {
+	ctx := cast(^WaylandContext)data
+	if ctx == nil || ctx.focused_pointer_window == nil {
+		return
+	}
+	context = ctx.app_context
+
+	dx := f32(0)
+	dy := f32(0)
+	#partial switch axis {
+	case .horizontal_scroll:
+		if ctx.axis_discrete_x != 0 {
+			dx = f32(ctx.axis_discrete_x)
+			ctx.axis_discrete_x = 0
+		} else {
+			dx = f32(value) / 256.0
+		}
+	case .vertical_scroll:
+		if ctx.axis_discrete_y != 0 {
+			dy = f32(ctx.axis_discrete_y)
+			ctx.axis_discrete_y = 0
+		} else {
+			dy = f32(value) / 256.0
+		}
+	}
+
+	if dx != 0 || dy != 0 {
+		ctx.event_handler(ctx.focused_pointer_window, EventPointerScroll{dx = dx, dy = dy})
+	}
+}
 
 @(private = "file")
 pointer_frame :: proc "c" (data: rawptr, pointer: ^wl.pointer) {}
@@ -571,7 +608,18 @@ pointer_axis_discrete :: proc "c" (
 	pointer: ^wl.pointer,
 	axis: wl.pointer_axis,
 	discrete: int,
-) {}
+) {
+	ctx := cast(^WaylandContext)data
+	if ctx == nil {
+		return
+	}
+	#partial switch axis {
+	case .horizontal_scroll:
+		ctx.axis_discrete_x = discrete
+	case .vertical_scroll:
+		ctx.axis_discrete_y = discrete
+	}
+}
 
 @(private = "file")
 fractional_scale_preferred_scale :: proc "c" (
