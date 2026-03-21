@@ -8,27 +8,29 @@ TARGET_FORMAT: vk.Format = .R32G32B32A32_SFLOAT
 VS_FULLSCREEN_SPV: []u8 = #load("shaders/vs_fullscreen.spv")
 
 GlowImage :: struct {
-	extent:     vk.Extent2D,
-	format:     vk.Format,
-	image:      vk.Image,
-	view:       vk.ImageView,
-	mem:        vk.DeviceMemory,
-	layout:     vk.ImageLayout,
-	src_stage:  vk.PipelineStageFlags2,
-	src_access: vk.AccessFlags2,
-	allocated:  bool,
+	extent:            vk.Extent2D,
+	format:            vk.Format,
+	image:             vk.Image,
+	view:              vk.ImageView,
+	mem:               vk.DeviceMemory,
+	layout:            vk.ImageLayout,
+	src_stage:         vk.PipelineStageFlags2,
+	src_access:        vk.AccessFlags2,
+	allocated:         bool,
+	in_descriptor_set: bool,
 }
 
 ResourceManager :: struct {
-	using vk_context: VulkanContext,
-	images:           [MAX_IMAGES]GlowImage,
-	image_width:      u32,
-	image_height:     u32,
-	vs_fullscreen:    vk.ShaderModule,
-	descriptor_pool:  vk.DescriptorPool,
-	desc_set_layout:  vk.DescriptorSetLayout,
-	desc_set:         vk.DescriptorSet,
-	pipeline_layout:  vk.PipelineLayout,
+	using vk_context:  VulkanContext,
+	images:            [MAX_IMAGES]GlowImage,
+	image_width:       u32,
+	image_height:      u32,
+	vs_fullscreen:     vk.ShaderModule,
+	descriptor_pool:   vk.DescriptorPool,
+	desc_set_layout:   vk.DescriptorSetLayout,
+	desc_set:          vk.DescriptorSet,
+	pipeline_layout:   vk.PipelineLayout,
+	descriptors_dirty: bool,
 }
 
 create_resource_manager :: proc(
@@ -61,6 +63,7 @@ create_resource_manager :: proc(
 	vk_try(vk.CreateDescriptorPool(res.device, &pool_info, nil, &res.descriptor_pool))
 	create_descriptor_set(res)
 	create_pipeline_layout(res)
+	res.descriptors_dirty = false
 }
 
 destroy_resource_manager :: proc(res: ^ResourceManager) {
@@ -79,12 +82,16 @@ destroy_resource_manager :: proc(res: ^ResourceManager) {
 }
 
 request_images :: proc(res: ^ResourceManager, base: u32, count: u32) {
+	created_any := false
 	for i in 0 ..< count {
-		if res.images[base + i].image == {} {
+		if !res.images[base + i].allocated {
 			create_image(&res.vk_context, res.image_width, res.image_height, &res.images[base + i])
+			created_any = true
 		}
 	}
-	write_image_descriptors(res, base, count)
+	if created_any {
+		res.descriptors_dirty = true
+	}
 }
 
 free_images :: proc(res: ^ResourceManager, base: int, count: int) {
@@ -165,29 +172,54 @@ destroy_image :: proc(ctx: ^VulkanContext, image: ^GlowImage) {
 		vk.FreeMemory(ctx.device, image.mem, nil)
 		image.mem = {}
 	}
+	image.in_descriptor_set = false
 	image.allocated = false
 }
 
-@(private = "file")
-write_image_descriptors :: proc(res: ^ResourceManager, base: u32, count: u32) {
-	infos := make([]vk.DescriptorImageInfo, count, context.temp_allocator)
-	for i in 0 ..< count {
-		img := res.images[base + i]
-		infos[i] = vk.DescriptorImageInfo {
+prepare_resources :: proc(res: ^ResourceManager) {
+	if !res.descriptors_dirty {
+		return
+	}
+	pending: u32 = 0
+	for i in 0 ..< MAX_IMAGES {
+		img := &res.images[i]
+		if img.allocated && !img.in_descriptor_set {
+			pending += 1
+		}
+	}
+	if pending == 0 {
+		res.descriptors_dirty = false
+		return
+	}
+	infos := make([]vk.DescriptorImageInfo, pending, context.temp_allocator)
+	writes := make([]vk.WriteDescriptorSet, pending, context.temp_allocator)
+	idx: u32 = 0
+	for i in 0 ..< MAX_IMAGES {
+		img := &res.images[i]
+		if !img.allocated || img.in_descriptor_set {
+			continue
+		}
+
+		infos[idx] = vk.DescriptorImageInfo {
 			imageView   = img.view,
 			imageLayout = .GENERAL,
 		}
+		writes[idx] = vk.WriteDescriptorSet {
+			sType           = .WRITE_DESCRIPTOR_SET,
+			dstSet          = res.desc_set,
+			dstBinding      = 0,
+			dstArrayElement = u32(i),
+			descriptorCount = 1,
+			descriptorType  = .STORAGE_IMAGE,
+			pImageInfo      = &infos[idx],
+		}
+
+		img.in_descriptor_set = true
+		idx += 1
 	}
-	write := vk.WriteDescriptorSet {
-		sType           = .WRITE_DESCRIPTOR_SET,
-		dstSet          = res.desc_set,
-		dstBinding      = 0,
-		dstArrayElement = u32(base),
-		descriptorCount = u32(count),
-		descriptorType  = .STORAGE_IMAGE,
-		pImageInfo      = &infos[0],
-	}
-	vk.UpdateDescriptorSets(res.device, 1, &write, 0, nil)
+
+	vk.UpdateDescriptorSets(res.device, idx, &writes[0], 0, nil)
+	res.descriptors_dirty = false
 }
 
 @(private = "file")

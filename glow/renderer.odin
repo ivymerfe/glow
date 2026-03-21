@@ -157,6 +157,7 @@ render_proc :: proc(raw: rawptr) {
 				),
 			)
 			renderer_lock(r)
+			glowr.prepare_resources(&g_ctx.res)
 			for _, win in r.windows {
 				rendered |= render_window(r, win)
 			}
