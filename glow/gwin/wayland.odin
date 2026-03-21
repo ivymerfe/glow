@@ -27,6 +27,21 @@ EventKeyUp :: struct {
 	key:    uint,
 }
 
+EventPointerMotion :: struct {
+	x: f32,
+	y: f32,
+}
+
+EventPointerRelative :: struct {
+	dx: f32,
+	dy: f32,
+}
+
+EventPointerButton :: struct {
+	button:  u32,
+	pressed: bool,
+}
+
 EventWindowClose :: struct {}
 
 EventWindowResize :: struct {
@@ -37,6 +52,9 @@ EventWindowResize :: struct {
 WindowEvent :: union {
 	EventKeyDown,
 	EventKeyUp,
+	EventPointerMotion,
+	EventPointerRelative,
+	EventPointerButton,
 	EventWindowClose,
 	EventWindowResize,
 }
@@ -52,10 +70,15 @@ WaylandContext :: struct {
 	seat:                     ^wl.seat,
 	keyboard:                 ^wl.keyboard,
 	pointer:                  ^wl.pointer,
+	relative_pointer_manager: ^wl.relative_pointer_manager_v1,
+	relative_pointer:         ^wl.relative_pointer_v1,
+	pointer_constraints:      ^wl.pointer_constraints_v1,
 	viewporter:               ^wl.viewporter,
 	fractional_scale_manager: ^wl.fractional_scale_manager_v1,
 	surface_to_window:        map[^wl.surface]^WaylandWindow,
 	focused_window:           ^WaylandWindow,
+	focused_pointer_window:   ^WaylandWindow,
+	last_pointer_serial:      uint,
 	kb_context:               xkb.KeyboardContext,
 	event_handler:            WindowEventHandler,
 }
@@ -77,6 +100,8 @@ WaylandWindow :: struct {
 	configured:       bool,
 	fullscreen:       bool,
 	visible:          bool,
+	locked_pointer:   ^wl.locked_pointer_v1,
+	pointer_locked:   bool,
 }
 
 @(private = "file")
@@ -131,6 +156,17 @@ pointer_listener := wl.pointer_listener {
 }
 
 @(private = "file")
+relative_pointer_listener := wl.relative_pointer_v1_listener {
+	relative_motion = relative_pointer_motion,
+}
+
+@(private = "file")
+locked_pointer_listener := wl.locked_pointer_v1_listener {
+	locked   = locked_pointer_locked,
+	unlocked = locked_pointer_unlocked,
+}
+
+@(private = "file")
 fractional_scale_listener := wl.fractional_scale_v1_listener {
 	preferred_scale = fractional_scale_preferred_scale,
 }
@@ -162,6 +198,20 @@ registry_global :: proc "c" (
 			registry,
 			name,
 			&wl.viewporter_interface,
+			1,
+		)
+	} else if interface == wl.relative_pointer_manager_v1_interface.name {
+		ctx.relative_pointer_manager = cast(^wl.relative_pointer_manager_v1)wl.registry_bind(
+			registry,
+			name,
+			&wl.relative_pointer_manager_v1_interface,
+			1,
+		)
+	} else if interface == wl.pointer_constraints_v1_interface.name {
+		ctx.pointer_constraints = cast(^wl.pointer_constraints_v1)wl.registry_bind(
+			registry,
+			name,
+			&wl.pointer_constraints_v1_interface,
 			1,
 		)
 	} else if interface == wl.fractional_scale_manager_v1_interface.name {
@@ -249,6 +299,19 @@ seat_capabilities :: proc "c" (data: rawptr, seat_ptr: ^wl.seat, caps: wl.seat_c
 		if ctx.pointer == nil {
 			ctx.pointer = wl.seat_get_pointer(seat_ptr)
 			wl.pointer_add_listener(ctx.pointer, &pointer_listener, data)
+			if ctx.relative_pointer_manager != nil {
+				ctx.relative_pointer = wl.relative_pointer_manager_v1_get_relative_pointer(
+					ctx.relative_pointer_manager,
+					ctx.pointer,
+				)
+				if ctx.relative_pointer != nil {
+					wl.relative_pointer_v1_add_listener(
+						ctx.relative_pointer,
+						&relative_pointer_listener,
+						data,
+					)
+				}
+			}
 		}
 	}
 }
@@ -373,7 +436,19 @@ pointer_enter :: proc "c" (
 	surface: ^wl.surface,
 	sx: i32,
 	sy: i32,
-) {}
+) {
+	ctx := cast(^WaylandContext)data
+	if ctx == nil {
+		return
+	}
+	context = ctx.app_context
+	ctx.focused_pointer_window = ctx.surface_to_window[surface]
+	ctx.last_pointer_serial = serial
+
+	if ctx.focused_pointer_window != nil && ctx.focused_pointer_window.pointer_locked {
+		wl.pointer_set_cursor(pointer, serial, nil, 0, 0)
+	}
+}
 
 @(private = "file")
 pointer_leave :: proc "c" (
@@ -381,10 +456,29 @@ pointer_leave :: proc "c" (
 	pointer: ^wl.pointer,
 	serial: uint,
 	surface: ^wl.surface,
-) {}
+) {
+	ctx := cast(^WaylandContext)data
+	if ctx == nil {
+		return
+	}
+	context = ctx.app_context
+	win := ctx.surface_to_window[surface]
+	if win == ctx.focused_pointer_window {
+		ctx.focused_pointer_window = nil
+	}
+}
 
 @(private = "file")
-pointer_motion :: proc "c" (data: rawptr, pointer: ^wl.pointer, time: uint, sx: i32, sy: i32) {}
+pointer_motion :: proc "c" (data: rawptr, pointer: ^wl.pointer, time: uint, sx: i32, sy: i32) {
+	ctx := cast(^WaylandContext)data
+	if ctx == nil || ctx.focused_pointer_window == nil {
+		return
+	}
+	context = ctx.app_context
+	x := f32(sx) / 256.0
+	y := f32(sy) / 256.0
+	ctx.event_handler(ctx.focused_pointer_window, EventPointerMotion{x = x, y = y})
+}
 
 @(private = "file")
 pointer_button :: proc "c" (
@@ -394,7 +488,55 @@ pointer_button :: proc "c" (
 	time: uint,
 	button: uint,
 	state: wl.pointer_button_state,
-) {}
+) {
+	ctx := cast(^WaylandContext)data
+	if ctx == nil || ctx.focused_pointer_window == nil {
+		return
+	}
+	context = ctx.app_context
+	ctx.event_handler(
+		ctx.focused_pointer_window,
+		EventPointerButton{button = u32(button), pressed = state == .pressed},
+	)
+}
+
+@(private = "file")
+relative_pointer_motion :: proc "c" (
+	data: rawptr,
+	relative_pointer: ^wl.relative_pointer_v1,
+	utime_hi: uint,
+	utime_lo: uint,
+	dx: wl.fixed_t,
+	dy: wl.fixed_t,
+	dx_unaccel: wl.fixed_t,
+	dy_unaccel: wl.fixed_t,
+) {
+	ctx := cast(^WaylandContext)data
+	if ctx == nil || ctx.focused_pointer_window == nil {
+		return
+	}
+	context = ctx.app_context
+	ctx.event_handler(
+		ctx.focused_pointer_window,
+		EventPointerRelative{dx = f32(dx_unaccel) / 256.0, dy = f32(dy_unaccel) / 256.0},
+	)
+}
+
+@(private = "file")
+locked_pointer_locked :: proc "c" (data: rawptr, locked_pointer: ^wl.locked_pointer_v1) {}
+
+@(private = "file")
+locked_pointer_unlocked :: proc "c" (data: rawptr, locked_pointer: ^wl.locked_pointer_v1) {
+	win := cast(^WaylandWindow)data
+	if win == nil {
+		return
+	}
+	context = win.ctx.app_context
+	win.pointer_locked = false
+	if win.locked_pointer == locked_pointer {
+		win.locked_pointer = nil
+	}
+}
 
 @(private = "file")
 pointer_axis :: proc "c" (
@@ -495,8 +637,17 @@ destroy_wayland_context :: proc(ctx: ^WaylandContext) {
 	if ctx.keyboard != nil {
 		wl.keyboard_destroy(ctx.keyboard)
 	}
+	if ctx.relative_pointer != nil {
+		wl.relative_pointer_v1_destroy(ctx.relative_pointer)
+	}
 	if ctx.pointer != nil {
 		wl.pointer_destroy(ctx.pointer)
+	}
+	if ctx.relative_pointer_manager != nil {
+		wl.relative_pointer_manager_v1_destroy(ctx.relative_pointer_manager)
+	}
+	if ctx.pointer_constraints != nil {
+		wl.pointer_constraints_v1_destroy(ctx.pointer_constraints)
 	}
 	if ctx.seat != nil {
 		wl.seat_destroy(ctx.seat)
@@ -636,6 +787,11 @@ hide_window :: proc(win: ^WaylandWindow) {
 	if !win.visible {
 		return
 	}
+	if win.locked_pointer != nil {
+		wl.locked_pointer_v1_destroy(win.locked_pointer)
+		win.locked_pointer = nil
+	}
+	win.pointer_locked = false
 	wl.surface_attach(win.surface, nil, 0, 0)
 	wl.surface_commit(win.surface)
 
@@ -663,6 +819,11 @@ destroy_window :: proc(win: ^WaylandWindow) {
 	if win == nil {
 		return
 	}
+	if win.locked_pointer != nil {
+		wl.locked_pointer_v1_destroy(win.locked_pointer)
+		win.locked_pointer = nil
+	}
+	win.pointer_locked = false
 	if win.fractional_scale != nil {
 		wl.fractional_scale_v1_destroy(win.fractional_scale)
 	}
@@ -732,4 +893,42 @@ set_window_fullscreen :: proc(win: ^WaylandWindow, fullscreen: bool) {
 		wl.toplevel_unset_fullscreen(win.toplevel)
 	}
 	win.fullscreen = fullscreen
+}
+
+set_window_pointer_lock :: proc(win: ^WaylandWindow, lock: bool) {
+	if win == nil {
+		return
+	}
+	if lock == win.pointer_locked {
+		return
+	}
+
+	ctx := win.ctx
+	if lock {
+		if ctx.pointer == nil {
+			return
+		}
+		if ctx.last_pointer_serial != 0 {
+			wl.pointer_set_cursor(ctx.pointer, ctx.last_pointer_serial, nil, 0, 0)
+		}
+		if ctx.pointer_constraints != nil && win.locked_pointer == nil {
+			win.locked_pointer = wl.pointer_constraints_v1_lock_pointer(
+				ctx.pointer_constraints,
+				win.surface,
+				ctx.pointer,
+				nil,
+				.persistent,
+			)
+			if win.locked_pointer != nil {
+				wl.locked_pointer_v1_add_listener(win.locked_pointer, &locked_pointer_listener, win)
+			}
+		}
+		win.pointer_locked = true
+	} else {
+		if win.locked_pointer != nil {
+			wl.locked_pointer_v1_destroy(win.locked_pointer)
+			win.locked_pointer = nil
+		}
+		win.pointer_locked = false
+	}
 }
