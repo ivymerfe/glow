@@ -1,6 +1,5 @@
 package glow
 
-import "core:strings"
 import "core:sync"
 import "core:thread"
 import "core:time"
@@ -88,18 +87,6 @@ renderer_destroy_all_windows :: proc(r: ^GlowRenderer) {
 	renderer_unlock(r)
 }
 
-set_window_visible :: proc(win: ^GlowWindow, visible: bool) {
-	gwin.set_window_visible(win.native, visible)
-	sync.atomic_store(&win.visible, visible)
-	if visible {
-		renderer_wakeup(&g_ctx.renderer)
-	}
-}
-
-set_window_active :: proc(win: ^GlowWindow, active: bool) {
-	sync.atomic_store(&win.active, active)
-}
-
 should_render :: proc(win: ^GlowWindow) -> bool {
 	return sync.atomic_load(&win.visible) && sync.atomic_load(&win.active)
 }
@@ -107,20 +94,18 @@ should_render :: proc(win: ^GlowWindow) -> bool {
 render_window :: proc(r: ^GlowRenderer, win: ^GlowWindow) -> bool {
 	pbuf_render_done(&win.pbuf)
 	prog := pbuf_get_current(&win.pbuf)
+	current_time := f32(time.duration_seconds(time.stopwatch_duration(r.timer)))
 	if should_render(win) && prog.allocated {
+		tick_window_input(win, current_time)
+		constants := get_window_constants(win, current_time)
 		width := f32(win.native.width) * win.native.scale
 		height := f32(win.native.height) * win.native.scale
 		render_info := glowr.RenderInfo {
-			width = u32(TARGET_WIDTH),
-			height = u32(TARGET_HEIGHT),
-			dst_width = u32(width),
+			width      = u32(TARGET_WIDTH),
+			height     = u32(TARGET_HEIGHT),
+			dst_width  = u32(width),
 			dst_height = u32(height),
-			constants = glowr.PushConstants {
-				time = f32(time.duration_seconds(time.stopwatch_duration(r.timer))),
-				width = width,
-				height = height,
-				frame_index = u32(win.frame_index),
-			},
+			constants  = constants,
 		}
 		if glowr.render(&win.ren, &render_info, prog) {
 			win.frame_index += 1
@@ -180,19 +165,14 @@ compiler_proc :: proc(raw: rawptr) {
 		for _, win in r.windows {
 			if pbuf_should_recompile(&win.pbuf) {
 				path, source := pbuf_get_source(&win.pbuf)
-				path_c := strings.clone_to_cstring(path)
-				source_c := strings.clone_to_cstring(source)
-				defer delete_cstring(path_c)
-				defer delete_cstring(source_c)
-
 				next := pbuf_get_next(&win.pbuf)
 				glowr.destroy_program(next)
 				success := glowr.compile_program(
 					next,
 					&g_ctx.res,
 					g_ctx.slang,
-					path_c,
-					source_c,
+					path,
+					source,
 					win.res_index * IMAGES_PER_WINDOW,
 				)
 				pbuf_compile_done(&win.pbuf, success)

@@ -3,6 +3,7 @@ package glowr
 import "../slang"
 import refl "../slang/reflection_wrapper"
 import "core:log"
+import "core:strings"
 import "core:time"
 import vk "vendor:vulkan"
 
@@ -19,14 +20,15 @@ Program :: struct {
 	pool_index:       u32,
 	start_index:      u32,
 	image_count:      u32,
+	camera_supported: bool,
 }
 
 compile_program :: proc(
 	prog: ^Program,
 	res: ^ResourceManager,
 	global: ^slang.IGlobalSession,
-	path: cstring,
-	source: cstring,
+	path: string,
+	source: string,
 	pool_index: u32,
 ) -> (
 	success: bool,
@@ -40,8 +42,13 @@ compile_program :: proc(
 	session := create_slang_session(global)
 	defer session->release()
 
+	path_c := strings.clone_to_cstring(path)
+	source_c := strings.clone_to_cstring(source)
+	defer delete_cstring(path_c)
+	defer delete_cstring(source_c)
+
 	diagnostics: ^slang.IBlob
-	module := session->loadModuleFromSourceString("shader", path, source, &diagnostics)
+	module := session->loadModuleFromSourceString("shader", path_c, source_c, &diagnostics)
 	diagnostics_check(path, diagnostics)
 	if module == nil {
 		return
@@ -120,6 +127,8 @@ compile_program :: proc(
 	prog.res = res
 	prog.pool_index = pool_index
 	prog.image_count = u32(len(prog.passes) + 1)
+	prog.camera_supported = false
+
 	create_info := vk.ShaderModuleCreateInfo {
 		sType    = .SHADER_MODULE_CREATE_INFO,
 		codeSize = int(target_code->getBufferSize()),
@@ -134,6 +143,7 @@ compile_program :: proc(
 	vk.DestroyShaderModule(prog.device, shader, nil)
 
 	request_images(res, prog.pool_index, prog.image_count)
+	parse_program_header(prog, source)
 	prog.allocated = true
 	success = true
 	return
@@ -150,6 +160,19 @@ destroy_program :: proc(prog: ^Program) {
 	}
 	delete(prog.passes)
 	prog.allocated = false
+}
+
+parse_program_header :: proc(prog: ^Program, source: string) {
+	first_line := strings.cut(source, 0, strings.index_rune(source, '\n'))
+	if strings.starts_with(first_line, "//") {
+		flags := strings.split(strings.cut(first_line, 2), ";")
+		for flag in flags {
+			switch strings.trim_space(flag) {
+			case "+camera":
+				prog.camera_supported = true
+			}
+		}
+	}
 }
 
 inherit_program_state :: proc(dest: ^Program, src: ^Program) {

@@ -18,8 +18,8 @@ float3 avg3x3(int2 coord)
 [shader("pixel")]
 float4 pass_buffer(VertexOutput in) : SV_Target0
 {
-    int2 coord = int2(in.uv * float2(1920, 1080));
-    if (scene.frame_idx == 0)
+    float2 coord = in.uv * scene.resolution;
+    if (isPressed(KEY_R))
     {
         float2 uv = in.uv;
         if (uv.x < 0.1 && uv.y < 0.1)
@@ -29,7 +29,18 @@ float4 pass_buffer(VertexOutput in) : SV_Target0
         else
             return float4(0.0, 0.0, 0.0, 1.0);
     }
-    float3 col = avg3x3(coord);
+    float2 rel = in.uv - scene.mouse;
+    rel.x *= scene.resolution.x / scene.resolution.y;
+    float dist = length(rel);
+    if (isPressed(KEY_MOUSE_LEFT) && dist < 0.03)
+    {
+        return float4(1., 0.5, 0., 1.0);
+    }
+    if (isPressed(KEY_MOUSE_RIGHT) && dist < 0.03)
+    {
+        return float4(0., 0.5, 1., 1.0);
+    }
+    float3 col = avg3x3(int2(coord));
     col *= 1.666;
     col.g *= abs(cos(2.5 * (col.r - col.b)));
     if (col.r > col.b)
@@ -68,7 +79,7 @@ float3 get_background(float3 rd)
 [shader("pixel")]
 float4 pass_draw(VertexOutput in) : SV_Target0
 {
-    int2 coord = int2(in.uv * float2(1920, 1080));
+    int2 coord = int2(in.uv * scene.resolution);
     float3 ink = read(0, coord);
     float3 thickness = get_thickness(ink);
     float3 normal = get_normal(coord);

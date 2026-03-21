@@ -9,7 +9,6 @@ import "core:time"
 
 import "glowr"
 import "gwin"
-import xkb "gwin/xkbcommon"
 import "slang"
 import vk "vendor:vulkan"
 
@@ -18,6 +17,7 @@ main :: proc() {
 	context.logger = log.create_file_logger(os.stderr, log.Level.Info)
 
 	init_input()
+	init_keymap()
 
 	launch_time := time.now()
 	if !gwin.create_wayland_context(&g_ctx.wayland, event_handler) {
@@ -64,32 +64,54 @@ main :: proc() {
 }
 
 event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent) {
+	win := renderer_get_window(&g_ctx.renderer, native.id)
+	if win == nil {
+		return
+	}
 	#partial switch event in event_union {
 	case gwin.EventKeyDown:
-		switch event.keysym {
-		case xkb.XKB_KEY_q:
+		key, ok := map_xkb_keysym(event.keysym)
+		if !ok {
+			break
+		}
+		switch key {
+		case KEY_Q:
 			renderer_destroy_window(&g_ctx.renderer, native.id)
 			msg_window_destroyed(native.id)
 			send_messages()
-		case xkb.XKB_KEY_e:
-			gwin.set_window_fullscreen(native, !native.fullscreen)
-		case xkb.XKB_KEY_v:
-			win := renderer_get_window(&g_ctx.renderer, native.id)
-			if win != nil {
-				set_window_visible(win, false)
-				msg_window_visible(win.id, false)
-				send_messages()
+		case KEY_E:
+			set_window_fullscreen(win, !native.fullscreen)
+		case KEY_H:
+			set_window_visible(win, false)
+			msg_window_visible(win.id, false)
+			send_messages()
+		case KEY_P:
+			active := !sync.atomic_load(&win.active)
+			set_window_active(win, active)
+			if active {
+				renderer_wakeup(&g_ctx.renderer)
 			}
-		case xkb.XKB_KEY_s:
-			win := renderer_get_window(&g_ctx.renderer, native.id)
-			if win != nil {
-				active := !sync.atomic_load(&win.active)
-				set_window_active(win, active)
-				if active {
-					renderer_wakeup(&g_ctx.renderer)
-				}
-			}
+		case:
+			on_window_input(win, key, true)
 		}
+	case gwin.EventKeyUp:
+		key, ok := map_xkb_keysym(event.keysym)
+		if ok {
+			on_window_input(win, key, false)
+		}
+	case gwin.EventKeyboardLeave:
+		on_window_leave(win)
+	case gwin.EventPointerMotion:
+		on_window_pointer_motion(win, event.x, event.y)
+	case gwin.EventPointerRelative:
+		on_window_pointer_relative(win, event.dx, event.dy)
+	case gwin.EventPointerButton:
+		button, ok := map_wayland_mouse_button(event.button)
+		if ok {
+			on_window_input(win, button, event.pressed)
+		}
+	case gwin.EventPointerScroll:
+		on_window_pointer_scroll(win, event.dx, event.dy)
 	}
 }
 

@@ -27,6 +27,8 @@ EventKeyUp :: struct {
 	key:    uint,
 }
 
+EventKeyboardLeave :: struct {}
+
 EventPointerMotion :: struct {
 	x: f32,
 	y: f32,
@@ -57,6 +59,7 @@ EventWindowResize :: struct {
 WindowEvent :: union {
 	EventKeyDown,
 	EventKeyUp,
+	EventKeyboardLeave,
 	EventPointerMotion,
 	EventPointerRelative,
 	EventPointerButton,
@@ -316,7 +319,7 @@ seat_capabilities :: proc "c" (data: rawptr, seat_ptr: ^wl.seat, caps: wl.seat_c
 		if ctx.pointer == nil {
 			ctx.pointer = wl.seat_get_pointer(seat_ptr)
 			wl.pointer_add_listener(ctx.pointer, &pointer_listener, data)
-			
+
 			if ctx.cursor_shape_manager != nil {
 				ctx.cursor_shape_device = wl.cursor_shape_manager_v1_get_pointer(
 					ctx.cursor_shape_manager,
@@ -395,9 +398,13 @@ keyboard_leave :: proc "c" (data: rawptr, kb: ^wl.keyboard, serial: uint, surfac
 	if ctx == nil {
 		return
 	}
+	context = ctx.app_context
 	win := ctx.surface_to_window[surface]
-	if win == ctx.focused_window {
-		ctx.focused_window = nil
+	if win != nil {
+		ctx.event_handler(win, EventKeyboardLeave{})
+		if win == ctx.focused_window {
+			ctx.focused_window = nil
+		}
 	}
 }
 
@@ -997,7 +1004,11 @@ set_window_pointer_lock :: proc(win: ^WaylandWindow, lock: bool) {
 				.persistent,
 			)
 			if win.locked_pointer != nil {
-				wl.locked_pointer_v1_add_listener(win.locked_pointer, &locked_pointer_listener, win)
+				wl.locked_pointer_v1_add_listener(
+					win.locked_pointer,
+					&locked_pointer_listener,
+					win,
+				)
 			}
 		}
 		win.pointer_locked = true

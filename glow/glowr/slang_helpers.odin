@@ -11,13 +11,13 @@ slang_check :: proc(result: slang.Result, loc := #caller_location) {
 	}
 }
 
-diagnostics_check :: proc(path: cstring, diagnostics: ^slang.IBlob, loc := #caller_location) {
+diagnostics_check :: proc(path: string, diagnostics: ^slang.IBlob, loc := #caller_location) {
 	if diagnostics != nil {
 		buffer := slice.bytes_from_ptr(
 			diagnostics->getBufferPointer(),
 			int(diagnostics->getBufferSize()),
 		)
-		log.debugf("[%s]: %s", path, string(buffer), loc)
+		log.debugf("[%s]: %s", path, buffer, loc)
 	}
 }
 

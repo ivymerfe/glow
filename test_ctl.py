@@ -99,10 +99,6 @@ def encode_fullscreen(window_id: int, fullscreen: bool) -> bytes:
     return _frame(WINDOW_FULLSCREEN, _u32(window_id) + _u8(1 if fullscreen else 0))
 
 
-def encode_suspend(window_id: int, suspend: bool) -> bytes:
-    return _frame(WINDOW_SUSPEND, _u32(window_id) + _u8(1 if suspend else 0))
-
-
 def encode_program(window_id: int, path: str, source_text: str) -> bytes:
     path_bytes = path.encode("utf-8")
     src_bytes = source_text.encode("utf-8")
@@ -214,11 +210,6 @@ def run_controller(glow_bin: str, glow_args: list[str]) -> int:
                     raise ValueError("usage: fullscreen <window_id> <true|false|1|0>")
                 send(encode_fullscreen(int(parts[1], 0), _parse_bool(parts[2])))
 
-            elif cmd == "suspend":
-                if len(parts) != 3:
-                    raise ValueError("usage: suspend <window_id> <true|false|1|0>")
-                send(encode_suspend(int(parts[1], 0), _parse_bool(parts[2])))
-
             elif cmd == "program":
                 if len(parts) != 4:
                     raise ValueError("usage: program <window_id> <path> <file>")
@@ -242,7 +233,8 @@ def run_controller(glow_bin: str, glow_args: list[str]) -> int:
     except Exception:
         pass
 
-    return int(child.wait())
+    code = int(child.wait())
+    print(f"glow exited with code {code}")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -257,7 +249,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         glow_args = glow_args[1:]
 
     glow_bin = os.path.expanduser(glow_bin)
-    return run_controller(glow_bin, glow_args)
+    run_controller(glow_bin, glow_args)
 
 
 if __name__ == "__main__":

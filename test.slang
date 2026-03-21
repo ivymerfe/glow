@@ -21,7 +21,7 @@ float g(float3 p, float s)
 float4 pass(VertexOutput in) : SV_Target0
 {
     float2 uv = in.uv - 0.5;
-    uv.x *= scene.width / scene.height;
+    uv.x *= scene.resolution.x / scene.resolution.y;
     float3 dir = normalize(float3(uv.x, uv.y, 1.0));
     float3 pos = float3(0., 0., scene.time * 0.1);
     float3 color = float3(0);
