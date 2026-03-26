@@ -54,13 +54,12 @@ compile_program :: proc(
 		return
 	}
 	entry_count := module->getDefinedEntryPointCount()
-	components := make([]^slang.IComponentType, entry_count + 1, context.temp_allocator)
+	components := make([]^slang.IComponentType, entry_count, context.temp_allocator)
 	for i in 0 ..< entry_count {
 		entry: ^slang.IEntryPoint
 		module->getDefinedEntryPoint(i, &entry)
 		components[i] = entry
 	}
-	components[entry_count] = module
 
 	composed_program: ^slang.IComponentType
 	session->createCompositeComponentType(
