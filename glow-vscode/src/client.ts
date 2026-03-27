@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import path from "node:path";
 
 const enum GlowCommandType {
   WINDOW_CREATE = 0,
@@ -6,6 +7,12 @@ const enum GlowCommandType {
   WINDOW_VISIBLE = 2,
   WINDOW_FULLSCREEN = 3,
   WINDOW_PROGRAM = 4,
+  COMPILE_PROGRAM = 5,
+}
+
+const enum CompilationTarget {
+  SLANG_MODULE = 0,
+  GLSL_SOURCE = 1,
 }
 
 const enum GlowMessageType {
@@ -93,6 +100,16 @@ export class GlowClient {
 
   isRunning(): boolean {
     return !!this.proc && !this.proc.killed;
+  }
+
+  destroy() {
+    this.windows.clear();
+    this.windowIdToKey.clear();
+    this.stdoutBuffer = Buffer.alloc(0);
+    if (this.proc && !this.proc.killed) {
+      this.proc.kill();
+    }
+    this.proc = undefined;
   }
 
   private write(buf: Buffer) {
@@ -186,11 +203,32 @@ export class GlowClient {
     const payload = Buffer.concat([
       u32le(windowId),
       u32le(pathBytes.byteLength),
-      u32le(srcBytes.byteLength),
       pathBytes,
+      u32le(srcBytes.byteLength),
       srcBytes,
     ]);
     this.write(frame(GlowCommandType.WINDOW_PROGRAM, payload));
+  }
+
+  private cmdCompileProgram(
+    target: CompilationTarget,
+    filePath: string,
+    source: string,
+    dstPath: string,
+  ) {
+    const pathBytes = Buffer.from(filePath, "utf8");
+    const srcBytes = Buffer.from(source, "utf8");
+    const dstBytes = Buffer.from(dstPath, "utf8");
+    const payload = Buffer.concat([
+      u32le(target),
+      u32le(pathBytes.byteLength),
+      pathBytes,
+      u32le(srcBytes.byteLength),
+      srcBytes,
+      u32le(dstBytes.byteLength),
+      dstBytes,
+    ]);
+    this.write(frame(GlowCommandType.COMPILE_PROGRAM, payload));
   }
 
   getOrCreateWindow(key: string): Window {
@@ -248,13 +286,25 @@ export class GlowClient {
     this.cmdWindowFullscreen(win.id);
   }
 
-  destroy() {
-    this.windows.clear();
-    this.windowIdToKey.clear();
-    this.stdoutBuffer = Buffer.alloc(0);
-    if (this.proc && !this.proc.killed) {
-      this.proc.kill();
-    }
-    this.proc = undefined;
+  compileModule(filePath: string, source: string) {
+    const parsed = path.parse(filePath);
+    const dstFile = path.join(parsed.dir, parsed.name) + ".slang-module";
+    this.cmdCompileProgram(
+      CompilationTarget.SLANG_MODULE,
+      filePath,
+      source,
+      dstFile,
+    );
+  }
+
+  compileToGlsl(filePath: string, source: string) {
+    const parsed = path.parse(filePath);
+    const dstFile = path.join(parsed.dir, parsed.name) + ".glsl";
+    this.cmdCompileProgram(
+      CompilationTarget.GLSL_SOURCE,
+      filePath,
+      source,
+      dstFile,
+    );
   }
 }

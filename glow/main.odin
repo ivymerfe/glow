@@ -19,7 +19,7 @@ g_renderer: GlowRenderer
 g_compiler_threads: ^thread.Thread
 
 main :: proc() {
-	context.logger = log.create_file_logger(os.stderr, log.Level.Info)
+	context.logger = log.create_file_logger(os.stderr, log.Level.Debug)
 
 	init_input()
 	init_keymap()
@@ -139,11 +139,11 @@ command_handler :: proc(cmd_union: GlowCommand) {
 	case CmdWindowProgram:
 		win := glow_get_window(&g_renderer, cmd.window_id)
 		if win != nil {
-			path := transmute(string)cmd.path
-			source := transmute(string)cmd.source
-			pbuf_update_source(&win.pbuf, path, source)
+			pbuf_update_source(&win.pbuf, cmd.path, cmd.source)
 			compiler_wakeup(&g_renderer)
 		}
+	case CmdCompileProgram:
+		run_compiler_thread(cmd.target, cmd.path, cmd.source, cmd.dst_path)
 	}
 }
 

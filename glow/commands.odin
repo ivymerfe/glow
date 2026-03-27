@@ -1,5 +1,6 @@
 package glow
 
+import "core:log"
 import "core:os"
 import "core:sys/windows"
 
@@ -9,9 +10,9 @@ GlowCommandType :: enum u8 {
 	WINDOW_VISIBLE,
 	WINDOW_FULLSCREEN,
 	WINDOW_PROGRAM,
+	COMPILE_PROGRAM,
 }
 
-// Decoded commands (safe to work with in-memory).
 CmdWindowCreate :: struct {
 	window_id: u32,
 }
@@ -25,20 +26,16 @@ CmdWindowVisible :: struct {
 CmdWindowToggleFullscreen :: struct {
 	window_id: u32,
 }
-
-// Wire format for PROGRAM payload:
-// u32 window_id
-// u32 path_len
-// u32 source_len
-// [path_len]u8 path_bytes
-// [source_len]u8 source_bytes
-//
-// Note: slices below point into the internal input buffer; if you need
-// them after the callback returns, copy them.
 CmdWindowProgram :: struct {
 	window_id: u32,
-	path:      []u8,
-	source:    []u8,
+	path:      string,
+	source:    string,
+}
+CmdCompileProgram :: struct {
+	target:   CompilationTarget,
+	path:     string,
+	source:   string,
+	dst_path: string,
 }
 
 GlowCommand :: union {
@@ -47,6 +44,7 @@ GlowCommand :: union {
 	CmdWindowVisible,
 	CmdWindowToggleFullscreen,
 	CmdWindowProgram,
+	CmdCompileProgram,
 }
 
 Command_Callback :: proc(cmd: GlowCommand)
@@ -92,6 +90,12 @@ read_bytes :: proc(data: []u8, cursor: ^int, n: int) -> []u8 {
 	out := data[cursor^:cursor^ + n]
 	cursor^ += n
 	return out
+}
+
+read_string :: proc(data: []u8, cursor: ^int) -> string {
+	length := int(read_u32_le_cursor(data, cursor))
+	str := transmute(string)read_bytes(data, cursor, length)
+	return str
 }
 
 stdin_has_data :: proc() -> bool {
@@ -151,19 +155,26 @@ decode_command :: proc(typ: GlowCommandType, payload: []u8) -> GlowCommand {
 
 	case .WINDOW_PROGRAM:
 		window_id := read_u32_le_cursor(payload, &c)
-		path_len := int(read_u32_le_cursor(payload, &c))
-		src_len := int(read_u32_le_cursor(payload, &c))
-
-		path_bytes := read_bytes(payload, &c, path_len)
-		src_bytes := read_bytes(payload, &c, src_len)
+		path := read_string(payload, &c)
+		source := read_string(payload, &c)
 
 		ensure(c == len(payload), "Extra bytes in WINDOW_PROGRAM payload")
-		return CmdWindowProgram{window_id = window_id, path = path_bytes, source = src_bytes}
-	}
+		return CmdWindowProgram{window_id = window_id, path = path, source = source}
 
-	// Unknown type: treat as protocol error for now.
-	ensure(false, "Unknown command type")
-	return CmdWindowDestroy{} // unreachable
+	case .COMPILE_PROGRAM:
+		target := cast(CompilationTarget)read_u32_le_cursor(payload, &c)
+		path := read_string(payload, &c)
+		source := read_string(payload, &c)
+		dst_path := read_string(payload, &c)
+		ensure(c == len(payload), "Extra bytes in COMPILE_MODULE payload")
+		return CmdCompileProgram {
+			target = target,
+			path = path,
+			source = source,
+			dst_path = dst_path,
+		}
+	}
+	log.panic("Unknown command type")
 }
 
 process_buffer :: proc(cb: Command_Callback) {
@@ -205,4 +216,3 @@ poll_commands :: proc(cb: Command_Callback) {
 
 	process_buffer(cb)
 }
-

@@ -106,6 +106,42 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("glow.compileModule", () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        return;
+      }
+      const doc = editor.document;
+      if (!isShaderDocument(doc)) {
+        void vscode.window.showWarningMessage(
+          "Glow: not a .slang/.slangh file.",
+        );
+        return;
+      }
+      startGlowIfNeeded();
+      glow.compileModule(doc.uri.fsPath, doc.getText());
+    }),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("glow.compileToGlsl", () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        return;
+      }
+      const doc = editor.document;
+      if (!isShaderDocument(doc)) {
+        void vscode.window.showWarningMessage(
+          "Glow: not a .slang/.slangh file.",
+        );
+        return;
+      }
+      startGlowIfNeeded();
+      glow.compileToGlsl(doc.uri.fsPath, doc.getText());
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument((e) => {
       if (!isShaderDocument(e.document)) return;
       const key = e.document.uri.toString();

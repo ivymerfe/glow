@@ -29,7 +29,7 @@ create_glow :: proc(r: ^GlowRenderer) {
 
 	r.running = true
 	r.render_thread = thread.create_and_start_with_data(r, render_proc, context)
-	r.compiler_thread = thread.create_and_start_with_data(r, compiler_proc, context)
+	r.compiler_thread = thread.create_and_start_with_data(r, window_program_compiler_proc, context)
 	time.stopwatch_start(&r.timer)
 }
 
@@ -170,7 +170,7 @@ render_proc :: proc(raw: rawptr) {
 	}
 }
 
-compiler_proc :: proc(raw: rawptr) {
+window_program_compiler_proc :: proc(raw: rawptr) {
 	r := cast(^GlowRenderer)raw
 
 	for {

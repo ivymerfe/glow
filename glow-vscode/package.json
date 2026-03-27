@@ -26,6 +26,14 @@
       {
         "command": "glow.restart",
         "title": "Glow: Restart"
+      },
+      {
+        "command": "glow.compileModule",
+        "title": "Glow: Compile Module"
+      },
+      {
+        "command": "glow.compileToGlsl",
+        "title": "Glow: Compile To GLSL"
       }
     ],
     "keybindings": [
