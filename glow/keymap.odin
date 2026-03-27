@@ -301,17 +301,11 @@ init_keymap :: proc() {
 }
 
 map_xkb_keysym :: proc(keysym: u32) -> (key: u32, ok: bool) {
-	if !g_keymap_ready {
-		init_keymap()
-	}
 	key, ok = g_keymap[keysym]
 	return
 }
 
 map_wayland_mouse_button :: proc(button: u32) -> (key: u32, ok: bool) {
-	if !g_keymap_ready {
-		init_keymap()
-	}
 	key, ok = g_mouse_keymap[button]
 	return
 }

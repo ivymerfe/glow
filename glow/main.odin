@@ -5,6 +5,7 @@ import "core:log"
 import "core:os"
 import "core:sync"
 import "core:sys/linux"
+import "core:thread"
 import "core:time"
 
 import "glowr"
@@ -12,6 +13,10 @@ import "gwin"
 import "slang"
 import vk "vendor:vulkan"
 
+g_slang: ^slang.IGlobalSession
+g_wayland: gwin.WaylandContext
+g_renderer: GlowRenderer
+g_compiler_threads: ^thread.Thread
 
 main :: proc() {
 	context.logger = log.create_file_logger(os.stderr, log.Level.Info)
@@ -20,25 +25,23 @@ main :: proc() {
 	init_keymap()
 
 	launch_time := time.now()
-	if !gwin.create_wayland_context(&g_ctx.wayland, event_handler) {
+	if !gwin.create_wayland_context(&g_wayland, event_handler) {
 		log.panic("Failed to initialize window system")
 	}
-	wl_init_end := time.now()
-	wl_init_time := time.duration_milliseconds(time.diff(launch_time, wl_init_end))
+	wl_init_time := time.duration_milliseconds(time.diff(launch_time, time.now()))
 	log.infof("Wl init -> %.2f ms", wl_init_time)
 
-	g_ctx.instance = glowr.create_vk_instance()
-	vk_init_end := time.now()
-	vk_init_time := time.duration_milliseconds(time.diff(wl_init_end, vk_init_end))
-	log.infof("Vk init -> %.2f ms", vk_init_time)
-
-	glowr.slang_check(slang.createGlobalSession(slang.API_VERSION, &g_ctx.slang))
-	slang_init_time := time.duration_milliseconds(time.diff(vk_init_end, time.now()))
+	slang_init_start := time.now()
+	glowr.slang_check(slang.createGlobalSession(slang.API_VERSION, &g_slang))
+	slang_init_time := time.duration_milliseconds(time.diff(slang_init_start, time.now()))
 	log.infof("Slang init -> %.2f ms", slang_init_time)
 
-	renderer_start(&g_ctx.renderer)
+	glow_init_start := time.now()
+	create_glow(&g_renderer)
+	glow_init_time := time.duration_milliseconds(time.diff(glow_init_start, time.now()))
+	log.infof("Glow init -> %.2fms", glow_init_time)
 
-	wayland_fd := gwin.get_display_fd(&g_ctx.wayland)
+	wayland_fd := gwin.get_display_fd(&g_wayland)
 	fds: [2]linux.Poll_Fd
 	fds[0] = linux.Poll_Fd {
 		fd     = linux.Fd(wayland_fd),
@@ -54,7 +57,7 @@ main :: proc() {
 			log.panic("poll failed")
 		}
 		if fds[0].revents & {.IN} != {} {
-			gwin.dispatch_events(&g_ctx.wayland)
+			gwin.dispatch_events(&g_wayland)
 		}
 		if fds[1].revents & {.IN} != {} {
 			poll_commands(command_handler)
@@ -64,7 +67,7 @@ main :: proc() {
 }
 
 event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent) {
-	win := renderer_get_window(&g_ctx.renderer, native.id)
+	win := glow_get_window(&g_renderer, native.id)
 	if win == nil {
 		return
 	}
@@ -76,7 +79,7 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 		}
 		switch key {
 		case KEY_Q:
-			renderer_destroy_window(&g_ctx.renderer, native.id)
+			glow_destroy_window(&g_renderer, native.id)
 			msg_window_destroyed(native.id)
 			send_messages()
 		case KEY_E:
@@ -89,7 +92,7 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 			active := !sync.atomic_load(&win.active)
 			set_window_active(win, active)
 			if active {
-				renderer_wakeup(&g_ctx.renderer)
+				renderer_wakeup(&g_renderer)
 			}
 		case:
 			on_window_input(win, key, true)
@@ -120,45 +123,36 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 command_handler :: proc(cmd_union: GlowCommand) {
 	switch cmd in cmd_union {
 	case CmdWindowCreate:
-		renderer_new_window(&g_ctx.renderer, cmd.window_id)
+		glow_new_window(&g_renderer, cmd.window_id)
 	case CmdWindowDestroy:
-		renderer_destroy_window(&g_ctx.renderer, cmd.window_id)
+		glow_destroy_window(&g_renderer, cmd.window_id)
 	case CmdWindowVisible:
-		win := renderer_get_window(&g_ctx.renderer, cmd.window_id)
+		win := glow_get_window(&g_renderer, cmd.window_id)
 		if win != nil {
 			set_window_visible(win, cmd.visible)
 		}
 	case CmdWindowToggleFullscreen:
-		win := renderer_get_window(&g_ctx.renderer, cmd.window_id)
+		win := glow_get_window(&g_renderer, cmd.window_id)
 		if win != nil {
 			gwin.set_window_fullscreen(win.native, !win.native.fullscreen)
 		}
 	case CmdWindowProgram:
-		win := renderer_get_window(&g_ctx.renderer, cmd.window_id)
+		win := glow_get_window(&g_renderer, cmd.window_id)
 		if win != nil {
 			path := transmute(string)cmd.path
 			source := transmute(string)cmd.source
 			pbuf_update_source(&win.pbuf, path, source)
-			compiler_wakeup(&g_ctx.renderer)
+			compiler_wakeup(&g_renderer)
 		}
 	}
 }
 
 shutdown :: proc() {
-	renderer_stop(&g_ctx.renderer)
+	destroy_glow(&g_renderer)
 
-	if g_ctx.vkc.device != {} {
-		vk.DeviceWaitIdle(g_ctx.vkc.device)
-		renderer_destroy_all_windows(&g_ctx.renderer)
-		glowr.destroy_resource_manager(&g_ctx.res)
-		glowr.destroy_vulkan_context(&g_ctx.vkc)
+	if g_slang != nil {
+		g_slang->release()
 	}
-	if g_ctx.instance != {} {
-		vk.DestroyInstance(g_ctx.instance, nil)
-	}
-	if g_ctx.slang != nil {
-		g_ctx.slang->release()
-	}
-	gwin.destroy_wayland_context(&g_ctx.wayland)
+	gwin.destroy_wayland_context(&g_wayland)
 	log.info("Goodbye")
 }
