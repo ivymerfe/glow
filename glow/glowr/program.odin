@@ -8,8 +8,14 @@ import "core:time"
 import vk "vendor:vulkan"
 
 ProgramPass :: struct {
-	entry_name: cstring,
-	pipeline:   vk.Pipeline,
+	entry_name:    cstring,
+	pipeline:      vk.Pipeline,
+	target_width:  uint,
+	target_height: uint,
+}
+
+CameraInfo :: struct {
+	required: bool,
 }
 
 Program :: struct {
@@ -20,7 +26,7 @@ Program :: struct {
 	pool_index:       uint,
 	start_index:      uint,
 	image_count:      uint,
-	camera_supported: bool,
+	camera:           CameraInfo,
 }
 
 compile_program :: proc(
@@ -93,7 +99,7 @@ compile_program :: proc(
 	}
 	prog.passes = make([]ProgramPass, entry_point_count)
 
-	entry_idx := 0
+	pass_index := 0
 	for i in 0 ..< entry_point_count {
 		entry_layout := layout_wrap->getEntryPointByIndex(i)
 		if entry_layout->getStage() == .FRAGMENT {
@@ -102,13 +108,14 @@ compile_program :: proc(
 				entry_name = entry_layout->getName()
 			}
 			entry: ^slang.IComponentType
-			prog.passes[entry_idx] = ProgramPass {
+			prog.passes[pass_index] = ProgramPass {
 				entry_name = entry_name,
 			}
-			entry_idx += 1
+			read_pass_attributes(prog, &prog.passes[pass_index], entry_layout->getFunction())
+			pass_index += 1
 		}
 	}
-	prog.passes = prog.passes[:entry_idx]
+	prog.passes = prog.passes[:pass_index]
 	if len(prog.passes) == 0 {
 		log.debugf("[%s] no fragment entry points found", path)
 		return
@@ -126,7 +133,6 @@ compile_program :: proc(
 	prog.res = res
 	prog.pool_index = pool_index
 	prog.image_count = len(prog.passes) + 1
-	prog.camera_supported = false
 
 	create_info := vk.ShaderModuleCreateInfo {
 		sType    = .SHADER_MODULE_CREATE_INFO,
@@ -142,10 +148,31 @@ compile_program :: proc(
 	vk.DestroyShaderModule(prog.device, shader, nil)
 
 	request_images(res, prog.pool_index, prog.image_count)
-	parse_program_header(prog, source)
 	prog.allocated = true
 	success = true
 	return
+}
+
+@(private = "file")
+read_pass_attributes :: proc(prog: ^Program, pass: ^ProgramPass, func: refl.FunctionReflection) {
+	attrCount := func->getUserAttributeCount()
+	for i in 0 ..< attrCount {
+		attr := func->getUserAttributeByIndex(i)
+		name := slang.ReflectionUserAttribute_GetName(attr)
+		if name == "glowCamera" {
+			prog.camera.required = true
+		} else if name == "glowTarget" {
+			width, height: int
+			res1 := slang.ReflectionUserAttribute_GetArgumentValueInt(attr, 0, &width)
+			if res1 == slang.OK {
+				pass.target_width = uint(width)
+			}
+			res2 := slang.ReflectionUserAttribute_GetArgumentValueInt(attr, 1, &height)
+			if res2 == slang.OK {
+				pass.target_height = uint(height)
+			}
+		}
+	}
 }
 
 destroy_program :: proc(prog: ^Program) {
@@ -159,19 +186,6 @@ destroy_program :: proc(prog: ^Program) {
 	}
 	delete(prog.passes)
 	prog.allocated = false
-}
-
-parse_program_header :: proc(prog: ^Program, source: string) {
-	first_line := strings.cut(source, 0, strings.index_rune(source, '\n'))
-	if strings.starts_with(first_line, "//") {
-		flags := strings.split(strings.cut(first_line, 2), ";")
-		for flag in flags {
-			switch strings.trim_space(flag) {
-			case "+camera":
-				prog.camera_supported = true
-			}
-		}
-	}
 }
 
 inherit_program_state :: proc(dest: ^Program, src: ^Program) {
@@ -204,6 +218,13 @@ draw_program :: proc(prog: ^Program, cmd: vk.CommandBuffer, render_info: ^Render
 		target := get_image(prog.res, prog.pool_index + prog.start_index)
 		pass_constants.prev_index = u32((prog.start_index + 1) % image_count)
 
+		target_width := pass.target_width == 0 ? prog.res.image_width : min(pass.target_width, prog.res.image_width)
+		target_height := pass.target_height == 0 ? prog.res.image_height : min(pass.target_height, prog.res.image_height)
+		pass_constants.width = f32(target_width)
+		pass_constants.height = f32(target_height)
+		target.pass_width = target_width
+		target.pass_height = target_height
+
 		transition_image(
 			cmd,
 			target,
@@ -211,6 +232,16 @@ draw_program :: proc(prog: ^Program, cmd: vk.CommandBuffer, render_info: ^Render
 			{.COLOR_ATTACHMENT_OUTPUT},
 			{.COLOR_ATTACHMENT_WRITE},
 		)
+
+		viewport := vk.Viewport {
+			x        = 0.0,
+			y        = 0.0,
+			width    = f32(target_width),
+			height   = f32(target_height),
+			minDepth = 0.0,
+			maxDepth = 1.0,
+		}
+		vk.CmdSetViewport(cmd, 0, 1, &viewport)
 
 		color_attachment := vk.RenderingAttachmentInfo {
 			sType       = .RENDERING_ATTACHMENT_INFO,
@@ -223,7 +254,7 @@ draw_program :: proc(prog: ^Program, cmd: vk.CommandBuffer, render_info: ^Render
 			sType = .RENDERING_INFO,
 			renderArea = {
 				offset = {0, 0},
-				extent = vk.Extent2D{width = render_info.width, height = render_info.height},
+				extent = vk.Extent2D{width = u32(target_width), height = u32(target_height)},
 			},
 			layerCount = 1,
 			colorAttachmentCount = 1,

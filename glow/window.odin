@@ -106,7 +106,7 @@ set_camera_active :: proc(win: ^GlowWindow, active: bool) {
 
 on_window_input :: proc(win: ^GlowWindow, key: u32, pressed: bool) {
 	if key == KEY_MOUSE_RIGHT && pressed {
-		if win.pbuf.prog.camera_supported {
+		if win.pbuf.prog.camera.required {
 			set_camera_active(win, !win.is_camera_active)
 			return
 		}
@@ -144,7 +144,7 @@ on_window_keyboard_leave :: proc(win: ^GlowWindow) {
 on_window_pointer_enter :: proc(win: ^GlowWindow, x: f32, y: f32) {
 	win.mouse_x = x / f32(win.native.width)
 	win.mouse_y = y / f32(win.native.height)
-	if win.native.fullscreen && win.pbuf.prog.camera_supported {
+	if win.native.fullscreen && win.pbuf.prog.camera.required {
 		set_camera_active(win, true)
 	}
 }

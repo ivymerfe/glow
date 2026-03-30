@@ -110,19 +110,11 @@ render_window :: proc(r: ^GlowRenderer, win: ^GlowWindow) -> bool {
 	}
 	width := f32(win.native.width) * win.native.scale
 	height := f32(win.native.height) * win.native.scale
-	target_width := g_options.width
-	target_height := g_options.height
-
 	current_time := f32(time.duration_seconds(time.stopwatch_duration(r.timer)))
 	tick_window_input(win, current_time)
 
 	constants := get_window_constants(win, current_time)
-	constants.width = f32(target_width)
-	constants.height = f32(target_height)
-
 	render_info := glowr.RenderInfo {
-		width      = u32(target_width),
-		height     = u32(target_height),
 		dst_width  = u32(width),
 		dst_height = u32(height),
 		constants  = constants,

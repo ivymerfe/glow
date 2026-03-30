@@ -1,4 +1,3 @@
-// +camera
 // source: https://www.shadertoy.com/view/Ms2SD1 - Seascape by TDM
 import base;
 
@@ -165,6 +164,8 @@ float heightMapTracing(float3 ori, float3 dir, out float3 p, float time)
 }
 
 [shader("pixel")]
+[glowCamera]
+[glowTarget(1920/2,1080/2)]
 float4 pass(VertexOutput in) : SV_Target0
 {
     float2 uv = in.uv * 2.0 - 1.0;

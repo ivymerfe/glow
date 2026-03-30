@@ -15,6 +15,8 @@ GlowImage :: struct {
 	layout:            vk.ImageLayout,
 	src_stage:         vk.PipelineStageFlags2,
 	src_access:        vk.AccessFlags2,
+	pass_width:        uint,
+	pass_height:       uint,
 	allocated:         bool,
 	in_descriptor_set: bool,
 }

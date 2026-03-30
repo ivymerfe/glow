@@ -46,8 +46,6 @@ PushConstants :: struct {
 }
 
 RenderInfo :: struct {
-	width:      u32,
-	height:     u32,
 	dst_width:  u32,
 	dst_height: u32,
 	constants:  PushConstants,
@@ -169,21 +167,9 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> b
 	}
 	vk.BeginCommandBuffer(cmd, &begin_info)
 
-	width := render_info.width
-	height := render_info.height
-	viewport := vk.Viewport {
-		x        = 0.0,
-		y        = 0.0,
-		width    = f32(width),
-		height   = f32(height),
-		minDepth = 0.0,
-		maxDepth = 1.0,
-	}
-	vk.CmdSetViewport(cmd, 0, 1, &viewport)
-
 	scissor := vk.Rect2D {
 		offset = vk.Offset2D{x = 0, y = 0},
-		extent = vk.Extent2D{width = u32(width), height = u32(height)},
+		extent = vk.Extent2D{width = u32(ren.swapchain_width), height = u32(ren.swapchain_height)},
 	}
 	vk.CmdSetScissor(cmd, 0, 1, &scissor)
 
@@ -199,12 +185,12 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> b
 	)
 
 	draw_program(program, cmd, render_info)
-	target := get_program_output(program)
-	if target == nil {
+	output := get_program_output(program)
+	if output == nil {
 		log.panic("no program output")
 	}
 
-	transition_image(cmd, target, .TRANSFER_SRC_OPTIMAL, {.TRANSFER}, {.TRANSFER_READ})
+	transition_image(cmd, output, .TRANSFER_SRC_OPTIMAL, {.TRANSFER}, {.TRANSFER_READ})
 
 	transition_image_layout(
 		cmd,
@@ -221,7 +207,7 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> b
 		srcSubresource = {aspectMask = {.COLOR}, layerCount = 1},
 		srcOffsets = [2]vk.Offset3D {
 			{0, 0, 0},
-			{i32(render_info.width), i32(render_info.height), 1},
+			{i32(output.pass_width), i32(output.pass_height), 1},
 		},
 		dstSubresource = {aspectMask = {.COLOR}, layerCount = 1},
 		dstOffsets = [2]vk.Offset3D {
@@ -235,7 +221,7 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> b
 	}
 	vk.CmdBlitImage(
 		cmd,
-		target.image,
+		output.image,
 		.TRANSFER_SRC_OPTIMAL,
 		swapchain_image,
 		.TRANSFER_DST_OPTIMAL,
@@ -243,7 +229,7 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> b
 		&copy_region,
 		.LINEAR,
 	)
-	transition_image(cmd, target, .GENERAL, {.FRAGMENT_SHADER}, {.SHADER_READ})
+	transition_image(cmd, output, .GENERAL, {.FRAGMENT_SHADER}, {.SHADER_READ})
 
 	transition_image_layout(
 		cmd,

@@ -26,6 +26,18 @@ struct VertexOutput
     float2 uv : POS_UV;
 }
 
+[__AttributeUsage(_AttributeTargets.Function)]
+struct glowCamera
+{
+}
+
+[__AttributeUsage(_AttributeTargets.Function)]
+struct glowTarget
+{
+    uint width;
+    uint height;
+}
+
 float3 readPrev(int2 coord)
 {
     return images[scene.pool_idx + scene.prev_idx].Load(coord).rgb;
