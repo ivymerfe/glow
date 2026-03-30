@@ -54,7 +54,12 @@
         "glow.executablePath": {
           "type": "string",
           "default": "glow",
-          "description": "Path to the glow executable (or command name in PATH)."
+          "description": "Path to the glow executable"
+        },
+        "glow.args": {
+          "type": "string",
+          "default": "-width=1920 -height=1080 -max-images=32 -max-windows=8",
+          "description": "Glow arguments"
         }
       }
     }

@@ -44,7 +44,8 @@ function startGlowIfNeeded() {
 
   const cfg = vscode.workspace.getConfiguration("glow");
   const exe = cfg.get<string>("executablePath", "glow");
-  glow.start(exe);
+  const args = cfg.get<string>("args", "").split(/\s+/);
+  glow.start(exe, args);
 }
 
 export function activate(context: vscode.ExtensionContext) {

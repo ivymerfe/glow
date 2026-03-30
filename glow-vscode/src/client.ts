@@ -57,9 +57,9 @@ export class GlowClient {
   public onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
   public onWindowClosed?: (windowId: number, key: string | undefined) => void;
 
-  start(executablePath: string): boolean {
+  start(executablePath: string, args: string[]): boolean {
     try {
-      this.proc = spawn(executablePath, [], {
+      this.proc = spawn(executablePath, args, {
         stdio: ["pipe", "pipe", "pipe"],
       });
     } catch (e) {

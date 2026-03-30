@@ -27,7 +27,7 @@ Options :: struct {
 g_options: Options
 
 main :: proc() {
-	flags.parse_or_exit(&g_options, os.args, .Unix)
+	flags.parse_or_exit(&g_options, os.args, .Odin)
 	if g_options.width == 0 {
 		g_options.width = 1920
 	}
