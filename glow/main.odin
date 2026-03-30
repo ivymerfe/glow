@@ -1,6 +1,7 @@
 package glow
 
 import "base:runtime"
+import "core:flags"
 import "core:log"
 import "core:os"
 import "core:sync"
@@ -11,14 +12,35 @@ import "core:time"
 import "glowr"
 import "gwin"
 import "slang"
-import vk "vendor:vulkan"
 
 g_slang: ^slang.IGlobalSession
 g_wayland: gwin.WaylandContext
 g_renderer: GlowRenderer
-g_compiler_threads: ^thread.Thread
+
+Options :: struct {
+	width:       uint `usage:"Buffer width"`,
+	height:      uint `usage:"Buffer height"`,
+	max_images:  uint `usage:"Max images per window"`,
+	max_windows: uint `usage:"Max window count"`,
+}
+
+g_options: Options
 
 main :: proc() {
+	flags.parse_or_exit(&g_options, os.args, .Unix)
+	if g_options.width == 0 {
+		g_options.width = 1920
+	}
+	if g_options.height == 0 {
+		g_options.height = 1080
+	}
+	if g_options.max_images == 0 {
+		g_options.max_images = 32
+	}
+	if g_options.max_windows == 0 {
+		g_options.max_windows = 8
+	}
+
 	context.logger = log.create_file_logger(os.stderr, log.Level.Debug)
 
 	init_input()

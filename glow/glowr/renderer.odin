@@ -17,8 +17,8 @@ Renderer :: struct {
 	surface_format:             vk.SurfaceFormatKHR,
 	present_mode:               vk.PresentModeKHR,
 	swapchain:                  Swapchain,
-	swapchain_width:            int,
-	swapchain_height:           int,
+	swapchain_width:            uint,
+	swapchain_height:           uint,
 	image_available_semaphore:  vk.Semaphore,
 	render_finished_semaphores: []vk.Semaphore,
 	cmd_pool:                   vk.CommandPool,
@@ -57,8 +57,8 @@ create_renderer :: proc(
 	vkc: VulkanContext,
 	res: ^ResourceManager,
 	surface: vk.SurfaceKHR,
-	swapchain_width: int,
-	swapchain_height: int,
+	swapchain_width: uint,
+	swapchain_height: uint,
 ) -> Renderer {
 	ren: Renderer
 	ren.vk_context = vkc
@@ -124,7 +124,7 @@ wait_renderer :: proc(ren: ^Renderer) {
 	vk_try(vk.QueueWaitIdle(ren.present_queue))
 }
 
-resize_swapchain :: proc(ren: ^Renderer, new_width: int, new_height: int) {
+resize_swapchain :: proc(ren: ^Renderer, new_width: uint, new_height: uint) {
 	wait_renderer(ren)
 	ren.swapchain_width = new_width
 	ren.swapchain_height = new_height

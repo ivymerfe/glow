@@ -17,9 +17,9 @@ Program :: struct {
 	res:              ^ResourceManager,
 	passes:           []ProgramPass,
 	allocated:        bool,
-	pool_index:       u32,
-	start_index:      u32,
-	image_count:      u32,
+	pool_index:       uint,
+	start_index:      uint,
+	image_count:      uint,
 	camera_supported: bool,
 }
 
@@ -29,7 +29,7 @@ compile_program :: proc(
 	global: ^slang.IGlobalSession,
 	path: string,
 	source: string,
-	pool_index: u32,
+	pool_index: uint,
 ) -> (
 	success: bool,
 ) {
@@ -125,7 +125,7 @@ compile_program :: proc(
 	prog.vk_context = res.vk_context
 	prog.res = res
 	prog.pool_index = pool_index
-	prog.image_count = u32(len(prog.passes) + 1)
+	prog.image_count = len(prog.passes) + 1
 	prog.camera_supported = false
 
 	create_info := vk.ShaderModuleCreateInfo {
@@ -196,13 +196,13 @@ draw_program :: proc(prog: ^Program, cmd: vk.CommandBuffer, render_info: ^Render
 	image_count := prog.image_count
 
 	pass_constants := render_info.constants
-	pass_constants.start_index = prog.start_index
-	pass_constants.pool_index = prog.pool_index
-	pass_constants.image_count = image_count
+	pass_constants.start_index = u32(prog.start_index)
+	pass_constants.pool_index = u32(prog.pool_index)
+	pass_constants.image_count = u32(image_count)
 
 	for pass, pass_index in prog.passes {
 		target := get_image(prog.res, prog.pool_index + prog.start_index)
-		pass_constants.prev_index = (prog.start_index + 1) % image_count
+		pass_constants.prev_index = u32((prog.start_index + 1) % image_count)
 
 		transition_image(
 			cmd,

@@ -2,11 +2,11 @@ package glow
 
 
 IndexAllocator :: struct {
-	max:  u32,
-	used: map[u32]bool,
+	max:  uint,
+	used: map[uint]bool,
 }
 
-alloc_index :: proc(ia: ^IndexAllocator) -> (index: u32, success: bool) {
+alloc_index :: proc(ia: ^IndexAllocator) -> (index: uint, success: bool) {
 	for i in 0 ..< ia.max {
 		if !ia.used[i] {
 			ia.used[i] = true
@@ -16,7 +16,7 @@ alloc_index :: proc(ia: ^IndexAllocator) -> (index: u32, success: bool) {
 	return 0, false
 }
 
-free_index :: proc(ia: ^IndexAllocator, index: u32) {
+free_index :: proc(ia: ^IndexAllocator, index: uint) {
 	if index < ia.max {
 		ia.used[index] = false
 	}

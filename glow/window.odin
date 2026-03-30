@@ -17,7 +17,7 @@ GlowWindow :: struct {
 	native:           ^gwin.WaylandWindow,
 	ren:              glowr.Renderer,
 	pbuf:             ProgramBuffer,
-	resource_index:   u32,
+	index:            uint,
 	visible:          bool,
 	active:           bool,
 	frame_index:      int,
@@ -36,14 +36,20 @@ GlowWindow :: struct {
 create_window :: proc(glow: ^GlowRenderer, window_id: u32, win: ^GlowWindow) {
 	win.glow = glow
 	win.id = window_id
+	index, index_success := alloc_index(&glow.window_indexes)
+	if !index_success {
+		log.panicf("Failed to allocate window index for %u", window_id)
+	}
+	win.index = index
+
 	native, wl_success := gwin.create_window(
 		&g_wayland,
 		window_id,
 		"glow",
 		640,
 		360,
-		SWAPCHAIN_WIDTH,
-		SWAPCHAIN_HEIGHT,
+		f32(g_options.width),
+		f32(g_options.height),
 	)
 	if !wl_success {
 		log.panic("Failed to create Wayland window")
@@ -59,14 +65,9 @@ create_window :: proc(glow: ^GlowRenderer, window_id: u32, win: ^GlowWindow) {
 		glow.vkc,
 		&glow.res,
 		surface,
-		SWAPCHAIN_WIDTH,
-		SWAPCHAIN_HEIGHT,
+		g_options.width,
+		g_options.height,
 	)
-	res_index, idx_success := alloc_index(&glow.resource_indexes)
-	if !idx_success {
-		log.panic("Failed to allocate resource index for window")
-	}
-	win.resource_index = res_index
 	win.visible = true
 	win.active = true
 	win.camera_speed = 4.0
@@ -75,7 +76,7 @@ create_window :: proc(glow: ^GlowRenderer, window_id: u32, win: ^GlowWindow) {
 destroy_window :: proc(win: ^GlowWindow) {
 	glowr.wait_renderer(&win.ren)
 	glowr.destroy_renderer(&win.ren)
-	free_index(&win.glow.resource_indexes, win.resource_index)
+	free_index(&win.glow.window_indexes, win.index)
 	gwin.destroy_window(win.native)
 }
 
@@ -204,8 +205,6 @@ get_window_constants :: proc(win: ^GlowWindow, time: f32) -> glowr.PushConstants
 		input = win.input,
 		mouse_x = win.mouse_x,
 		mouse_y = win.mouse_y,
-		width = TARGET_WIDTH,
-		height = TARGET_HEIGHT,
 		time = time,
 		frame_index = u32(win.frame_index),
 	}

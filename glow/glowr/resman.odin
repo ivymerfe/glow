@@ -3,7 +3,6 @@ package glowr
 import "core:log"
 import vk "vendor:vulkan"
 
-MAX_IMAGES :: 1024
 TARGET_FORMAT: vk.Format = .R32G32B32A32_SFLOAT
 VS_FULLSCREEN_SPV: []u8 = #load("shaders/vs_fullscreen.spv")
 
@@ -22,9 +21,10 @@ GlowImage :: struct {
 
 ResourceManager :: struct {
 	using vk_context:  VulkanContext,
-	images:            [MAX_IMAGES]GlowImage,
-	image_width:       u32,
-	image_height:      u32,
+	desc_count:        uint,
+	images:            []GlowImage,
+	image_width:       uint,
+	image_height:      uint,
 	vs_fullscreen:     vk.ShaderModule,
 	descriptor_pool:   vk.DescriptorPool,
 	desc_set_layout:   vk.DescriptorSetLayout,
@@ -36,8 +36,9 @@ ResourceManager :: struct {
 create_resource_manager :: proc(
 	res: ^ResourceManager,
 	vkc: VulkanContext,
-	image_width: u32,
-	image_height: u32,
+	image_width: uint,
+	image_height: uint,
+	desc_count: uint,
 ) {
 	res.vk_context = vkc
 	res.image_width = image_width
@@ -49,9 +50,10 @@ create_resource_manager :: proc(
 		log.panic("Failed to load vertex shader")
 	}
 
+	res.desc_count = desc_count
 	pool_size := vk.DescriptorPoolSize {
 		type            = .STORAGE_IMAGE,
-		descriptorCount = MAX_IMAGES,
+		descriptorCount = u32(desc_count),
 	}
 	pool_info := vk.DescriptorPoolCreateInfo {
 		sType         = .DESCRIPTOR_POOL_CREATE_INFO,
@@ -63,6 +65,7 @@ create_resource_manager :: proc(
 	vk_try(vk.CreateDescriptorPool(res.device, &pool_info, nil, &res.descriptor_pool))
 	create_descriptor_set(res)
 	create_pipeline_layout(res)
+	res.images = make([]GlowImage, desc_count)
 	res.descriptors_dirty = false
 }
 
@@ -79,9 +82,10 @@ destroy_resource_manager :: proc(res: ^ResourceManager) {
 			destroy_image(&res.vk_context, &image)
 		}
 	}
+	delete(res.images)
 }
 
-request_images :: proc(res: ^ResourceManager, base: u32, count: u32) {
+request_images :: proc(res: ^ResourceManager, base: uint, count: uint) {
 	created_any := false
 	for i in 0 ..< count {
 		if !res.images[base + i].allocated {
@@ -102,8 +106,8 @@ free_images :: proc(res: ^ResourceManager, base: int, count: int) {
 	}
 }
 
-get_image :: proc(res: ^ResourceManager, idx: u32, location := #caller_location) -> ^GlowImage {
-	if idx >= MAX_IMAGES {
+get_image :: proc(res: ^ResourceManager, idx: uint, location := #caller_location) -> ^GlowImage {
+	if idx >= len(res.images) {
 		log.panicf("get_image out of bounds: %d", idx, location)
 	}
 	img := &res.images[idx]
@@ -136,11 +140,11 @@ transition_image :: proc(
 	image.src_access = new_access
 }
 
-create_image :: proc(vk_context: ^VulkanContext, width: u32, height: u32, image: ^GlowImage) {
+create_image :: proc(vk_context: ^VulkanContext, width: uint, height: uint, image: ^GlowImage) {
 	image.format = TARGET_FORMAT
 	image.extent = vk.Extent2D {
-		width  = width,
-		height = height,
+		width  = u32(width),
+		height = u32(height),
 	}
 	img, mem := create_image_2d(
 		vk_context,
@@ -181,8 +185,7 @@ prepare_resources :: proc(res: ^ResourceManager) {
 		return
 	}
 	pending: u32 = 0
-	for i in 0 ..< MAX_IMAGES {
-		img := &res.images[i]
+	for &img, i in res.images {
 		if img.allocated && !img.in_descriptor_set {
 			pending += 1
 		}
@@ -194,8 +197,7 @@ prepare_resources :: proc(res: ^ResourceManager) {
 	infos := make([]vk.DescriptorImageInfo, pending, context.temp_allocator)
 	writes := make([]vk.WriteDescriptorSet, pending, context.temp_allocator)
 	idx: u32 = 0
-	for i in 0 ..< MAX_IMAGES {
-		img := &res.images[i]
+	for &img, i in res.images {
 		if !img.allocated || img.in_descriptor_set {
 			continue
 		}
@@ -227,7 +229,7 @@ create_descriptor_set :: proc(res: ^ResourceManager) {
 	binding := vk.DescriptorSetLayoutBinding {
 		binding            = 0,
 		descriptorType     = .STORAGE_IMAGE,
-		descriptorCount    = MAX_IMAGES,
+		descriptorCount    = u32(res.desc_count),
 		stageFlags         = {.FRAGMENT},
 		pImmutableSamplers = nil,
 	}

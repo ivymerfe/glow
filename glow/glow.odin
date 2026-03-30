@@ -9,23 +9,23 @@ import "gwin"
 import vk "vendor:vulkan"
 
 GlowRenderer :: struct {
-	instance:         vk.Instance,
-	vkc:              glowr.VulkanContext,
-	res:              glowr.ResourceManager,
-	resource_indexes: IndexAllocator,
-	windows:          map[u32]^GlowWindow,
-	timer:            time.Stopwatch,
-	render_thread:    ^thread.Thread,
-	mtx:              sync.RW_Mutex,
-	render_signal:    sync.Auto_Reset_Event,
-	compiler_thread:  ^thread.Thread,
-	compiler_signal:  sync.Auto_Reset_Event,
-	running:          bool,
+	instance:        vk.Instance,
+	vkc:             glowr.VulkanContext,
+	res:             glowr.ResourceManager,
+	window_indexes:  IndexAllocator,
+	windows:         map[u32]^GlowWindow,
+	timer:           time.Stopwatch,
+	render_thread:   ^thread.Thread,
+	mtx:             sync.RW_Mutex,
+	render_signal:   sync.Auto_Reset_Event,
+	compiler_thread: ^thread.Thread,
+	compiler_signal: sync.Auto_Reset_Event,
+	running:         bool,
 }
 
 create_glow :: proc(r: ^GlowRenderer) {
 	r.instance = glowr.create_vk_instance()
-	r.resource_indexes.max = glowr.MAX_IMAGES / IMAGES_PER_WINDOW
+	r.window_indexes.max = g_options.max_windows
 
 	r.running = true
 	r.render_thread = thread.create_and_start_with_data(r, render_proc, context)
@@ -55,7 +55,13 @@ destroy_glow :: proc(r: ^GlowRenderer) {
 glow_ensure_context :: proc(r: ^GlowRenderer, surface: vk.SurfaceKHR) {
 	if r.vkc == {} {
 		r.vkc = glowr.create_vulkan_context(r.instance, surface)
-		glowr.create_resource_manager(&r.res, r.vkc, TARGET_WIDTH, TARGET_HEIGHT)
+		glowr.create_resource_manager(
+			&r.res,
+			r.vkc,
+			g_options.width,
+			g_options.height,
+			g_options.max_images * g_options.max_windows,
+		)
 	}
 }
 
@@ -102,14 +108,21 @@ render_window :: proc(r: ^GlowRenderer, win: ^GlowWindow) -> bool {
 	if !prog.allocated {
 		log.panic("Attempted to render with unallocated program")
 	}
-	current_time := f32(time.duration_seconds(time.stopwatch_duration(r.timer)))
-	tick_window_input(win, current_time)
-	constants := get_window_constants(win, current_time)
 	width := f32(win.native.width) * win.native.scale
 	height := f32(win.native.height) * win.native.scale
+	target_width := g_options.width
+	target_height := g_options.height
+
+	current_time := f32(time.duration_seconds(time.stopwatch_duration(r.timer)))
+	tick_window_input(win, current_time)
+
+	constants := get_window_constants(win, current_time)
+	constants.width = f32(target_width)
+	constants.height = f32(target_height)
+
 	render_info := glowr.RenderInfo {
-		width      = u32(TARGET_WIDTH),
-		height     = u32(TARGET_HEIGHT),
+		width      = u32(target_width),
+		height     = u32(target_height),
 		dst_width  = u32(width),
 		dst_height = u32(height),
 		constants  = constants,
@@ -189,7 +202,7 @@ window_program_compiler_proc :: proc(raw: rawptr) {
 					g_slang,
 					path,
 					source,
-					win.resource_index * IMAGES_PER_WINDOW,
+					win.index * g_options.max_images,
 				)
 				pbuf_compile_done(&win.pbuf, success, prog, version)
 				if success {
