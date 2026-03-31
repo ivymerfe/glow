@@ -984,6 +984,9 @@ set_window_fullscreen :: proc(win: ^WaylandWindow, fullscreen: bool) {
 	if win == nil {
 		return
 	}
+	if fullscreen == win.fullscreen {
+		return
+	}
 	if fullscreen {
 		wl.toplevel_set_fullscreen(win.toplevel, nil)
 	} else {

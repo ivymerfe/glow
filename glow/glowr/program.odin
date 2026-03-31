@@ -55,8 +55,8 @@ compile_program :: proc(
 
 	diagnostics: ^slang.IBlob
 	module := session->loadModuleFromSourceString("shader", path_c, source_c, &diagnostics)
-	diagnostics_check(path, diagnostics)
 	if module == nil {
+		diagnostics_check(path, diagnostics)
 		return
 	}
 	entry_count := module->getDefinedEntryPointCount()
@@ -94,7 +94,7 @@ compile_program :: proc(
 
 	entry_point_count := layout_wrap->getEntryPointCount()
 	if entry_point_count == 0 {
-		log.debugf("[%s] no entry points found", path)
+		log.infof("[%s] no entry points found", path)
 		return
 	}
 	prog.passes = make([]ProgramPass, entry_point_count)
@@ -117,7 +117,7 @@ compile_program :: proc(
 	}
 	prog.passes = prog.passes[:pass_index]
 	if len(prog.passes) == 0 {
-		log.debugf("[%s] no fragment entry points found", path)
+		log.infof("[%s] no fragment entry points found", path)
 		return
 	}
 	target_code: ^slang.IBlob
@@ -218,8 +218,10 @@ draw_program :: proc(prog: ^Program, cmd: vk.CommandBuffer, render_info: ^Render
 		target := get_image(prog.res, prog.pool_index + prog.start_index)
 		pass_constants.prev_index = u32((prog.start_index + 1) % image_count)
 
-		target_width := pass.target_width == 0 ? prog.res.image_width : min(pass.target_width, prog.res.image_width)
-		target_height := pass.target_height == 0 ? prog.res.image_height : min(pass.target_height, prog.res.image_height)
+		target_width :=
+			pass.target_width == 0 ? prog.res.image_width : min(pass.target_width, prog.res.image_width)
+		target_height :=
+			pass.target_height == 0 ? prog.res.image_height : min(pass.target_height, prog.res.image_height)
 		pass_constants.width = f32(target_width)
 		pass_constants.height = f32(target_height)
 		target.pass_width = target_width

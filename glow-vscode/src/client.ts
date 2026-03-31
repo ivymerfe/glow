@@ -54,8 +54,9 @@ export class GlowClient {
 
   public onError?: (message: string) => void;
   public onWarning?: (message: string) => void;
-  public onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
+  public onStderr?: (message: string) => void;
   public onWindowClosed?: (windowId: number, key: string | undefined) => void;
+  public onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
 
   start(executablePath: string, args: string[]): boolean {
     try {
@@ -76,20 +77,10 @@ export class GlowClient {
     });
     this.proc.on("exit", (code, signal) => {
       this.onExit?.(code, signal);
-      if (code !== null) {
-        this.onWarning?.(`Glow: subprocess exited with code ${code}.`);
-        if (code === 127) {
-          this.onError?.("Glow: check slang shared libraries");
-        }
-      } else if (signal) {
-        this.onWarning?.(`Glow: subprocess exited with signal ${signal}.`);
-      } else {
-        this.onWarning?.("Glow: subprocess exited.");
-      }
       this.destroy();
     });
     this.proc.stderr.on("data", (chunk) => {
-      console.log(chunk.toString());
+      this.onStderr?.(chunk.toString());
     });
     this.proc.stdout.on("data", (chunk) => {
       this.handleStdoutChunk(chunk);

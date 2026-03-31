@@ -22,6 +22,7 @@ Options :: struct {
 	height:      uint `usage:"Buffer height"`,
 	max_images:  uint `usage:"Max images per window"`,
 	max_windows: uint `usage:"Max window count"`,
+	debug:       bool `usage:"Show debug messages, enable validation layers"`,
 }
 
 g_options: Options
@@ -41,7 +42,8 @@ main :: proc() {
 		g_options.max_windows = 8
 	}
 
-	context.logger = log.create_file_logger(os.stderr, log.Level.Debug)
+	log_level := g_options.debug ? log.Level.Debug : log.Level.Info
+	context.logger = log.create_file_logger(os.stderr, log_level, {.Level, .Procedure})
 
 	init_input()
 	init_keymap()
@@ -106,6 +108,8 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 			send_messages()
 		case KEY_E:
 			set_window_fullscreen(win, !native.fullscreen)
+		case KEY_ESCAPE:
+			set_window_fullscreen(win, false)
 		case KEY_H:
 			set_window_visible(win, false)
 			msg_window_visible(win.id, false)

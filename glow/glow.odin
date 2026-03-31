@@ -24,7 +24,7 @@ GlowRenderer :: struct {
 }
 
 create_glow :: proc(r: ^GlowRenderer) {
-	r.instance = glowr.create_vk_instance()
+	r.instance = glowr.create_vk_instance(g_options.debug)
 	r.window_indexes.max = g_options.max_windows
 
 	r.running = true

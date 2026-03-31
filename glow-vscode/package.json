@@ -1,7 +1,7 @@
 {
   "name": "glow",
   "displayName": "Glow",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": {
     "name": "ivy"
   },
@@ -58,7 +58,7 @@
         },
         "glow.args": {
           "type": "string",
-          "default": "-width=1920 -height=1080 -max-images=32 -max-windows=8",
+          "default": "-width=1920 -height=1080 -max-images=32 -max-windows=8 -debug=false",
           "description": "Glow arguments"
         }
       }

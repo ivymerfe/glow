@@ -5,6 +5,25 @@ import "core:dynlib"
 import "core:log"
 import vk "vendor:vulkan"
 
+DEVICE_EXTENSIONS :: []cstring {
+	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
+	vk.KHR_SPIRV_1_4_EXTENSION_NAME,
+	vk.KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+	vk.KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
+	vk.KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME,
+}
+
+DEBUG_EXTENSIONS :: []cstring {
+	vk.KHR_SURFACE_EXTENSION_NAME,
+	vk.KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+	vk.EXT_DEBUG_UTILS_EXTENSION_NAME,
+}
+
+NORMAL_EXTENSIONS :: []cstring {
+	vk.KHR_SURFACE_EXTENSION_NAME,
+	vk.KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+}
+
 VulkanContext :: struct {
 	instance:           vk.Instance,
 	physical_device:    vk.PhysicalDevice,
@@ -38,7 +57,7 @@ destroy_vulkan_context :: proc(vkc: ^VulkanContext) {
 }
 
 g_vk_runtime_context: runtime.Context
-create_vk_instance :: proc() -> vk.Instance {
+create_vk_instance :: proc(enable_validation_layers: bool) -> vk.Instance {
 	g_module, loaded := dynlib.load_library("libvulkan.so.1", true)
 	if !loaded {
 		g_module, loaded = dynlib.load_library("libvulkan.so", true)
@@ -63,17 +82,8 @@ create_vk_instance :: proc() -> vk.Instance {
 			apiVersion = vk.MAKE_VERSION(1, 4, 330),
 		},
 	}
-	extensions :=
-		[]cstring {
-			vk.KHR_SURFACE_EXTENSION_NAME,
-			vk.KHR_WAYLAND_SURFACE_EXTENSION_NAME,
-			vk.EXT_DEBUG_UTILS_EXTENSION_NAME,
-		} when ENABLE_VALIDATION else []cstring {
-			vk.KHR_SURFACE_EXTENSION_NAME,
-			vk.KHR_WAYLAND_SURFACE_EXTENSION_NAME,
-		}
-
-	when ENABLE_VALIDATION {
+	extensions := enable_validation_layers ? DEBUG_EXTENSIONS : NORMAL_EXTENSIONS
+	if enable_validation_layers {
 		create_info.ppEnabledLayerNames = raw_data([]cstring{"VK_LAYER_KHRONOS_validation"})
 		create_info.enabledLayerCount = 1
 
@@ -117,16 +127,14 @@ vk_messenger_callback :: proc "system" (
 ) -> b32 {
 	context = g_vk_runtime_context
 	msg := pCallbackData.pMessage
-	when ENABLE_VALIDATION {
-		if .ERROR in messageSeverity {
-			log.errorf("Vulkan Validation: %s", msg)
-		} else if .WARNING in messageSeverity {
-			log.warnf("Vulkan Validation: %s", msg)
-		} else if .INFO in messageSeverity {
-			log.infof("Vulkan Validation: %s", msg)
-		} else {
-			log.debugf("Vulkan Validation: %s", msg)
-		}
+	if .ERROR in messageSeverity {
+		log.errorf("%s", msg)
+	} else if .WARNING in messageSeverity {
+		log.warnf("%s", msg)
+	} else if .INFO in messageSeverity {
+		log.infof("%s", msg)
+	} else {
+		log.debugf("%s", msg)
 	}
 	return false
 }

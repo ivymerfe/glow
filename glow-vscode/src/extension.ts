@@ -2,14 +2,52 @@ import * as vscode from "vscode";
 import * as path from "node:path";
 import { GlowClient } from "./client";
 
-function isShaderDocument(doc: vscode.TextDocument): boolean {
-  if (doc.uri.scheme !== "file") return false;
-  if (doc.languageId === "slang") return true;
-  const ext = path.extname(doc.uri.fsPath).toLowerCase();
-  return ext === ".slang" || ext === ".slangh";
+const output = vscode.window.createOutputChannel("Glow");
+const glow = new GlowClient();
+
+glow.onError = (message) => {
+  vscode.window.showErrorMessage(message);
+};
+
+glow.onWarning = (message) => {
+  vscode.window.showWarningMessage(message);
+};
+
+glow.onStderr = (message) => {
+  output.append(message);
+};
+
+glow.onWindowClosed = (_windowId, key) => {
+  if (key) cancelPendingUpdate(key);
+};
+
+glow.onExit = (code, signal) => {
+  if (code === 127) {
+    vscode.window.showErrorMessage(
+      "Glow: exited with code 127, check slang shared libraries",
+    );
+  } else if (signal) {
+    vscode.window.showErrorMessage(
+      `Glow: subprocess exited with signal ${signal}.`,
+    );
+  } else if (code !== null) {
+    vscode.window.showWarningMessage(
+      `Glow: subprocess exited with code ${code}.`,
+    );
+  } else {
+    vscode.window.showErrorMessage("Glow: subprocess exited, reason unknown.");
+  }
+};
+
+function startGlowIfNeeded() {
+  if (glow.isRunning()) return;
+
+  const cfg = vscode.workspace.getConfiguration("glow");
+  const exe = cfg.get<string>("executablePath", "glow");
+  const args = cfg.get<string>("args", "").split(/\s+/);
+  glow.start(exe, args);
 }
 
-const glow = new GlowClient();
 const pendingUpdateTimers = new Map<string, NodeJS.Timeout>();
 
 function cancelPendingUpdate(key: string) {
@@ -27,25 +65,11 @@ function scheduleUpdate(key: string, fn: () => void, debounceMs = 75) {
   pendingUpdateTimers.set(key, t);
 }
 
-glow.onError = (message) => {
-  void vscode.window.showErrorMessage(message);
-};
-
-glow.onWarning = (message) => {
-  void vscode.window.showWarningMessage(message);
-};
-
-glow.onWindowClosed = (_windowId, key) => {
-  if (key) cancelPendingUpdate(key);
-};
-
-function startGlowIfNeeded() {
-  if (glow.isRunning()) return;
-
-  const cfg = vscode.workspace.getConfiguration("glow");
-  const exe = cfg.get<string>("executablePath", "glow");
-  const args = cfg.get<string>("args", "").split(/\s+/);
-  glow.start(exe, args);
+function isShaderDocument(doc: vscode.TextDocument): boolean {
+  if (doc.uri.scheme !== "file") return false;
+  if (doc.languageId === "slang") return true;
+  const ext = path.extname(doc.uri.fsPath).toLowerCase();
+  return ext === ".slang" || ext === ".slangh";
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -147,6 +171,17 @@ export function activate(context: vscode.ExtensionContext) {
       if (!isShaderDocument(e.document)) return;
       const key = e.document.uri.toString();
       if (!glow.isPreviewActive(key)) return;
+      const diagnostics = vscode.languages.getDiagnostics(e.document.uri);
+      var hasError = false;
+      for (const d of diagnostics) {
+        if (d.severity == vscode.DiagnosticSeverity.Error) {
+          hasError = true;
+          break;
+        }
+      }
+      if (hasError) {
+        return;
+      }
       scheduleUpdate(key, () => {
         glow.updatePreview(key, e.document.uri.fsPath, e.document.getText());
       });
