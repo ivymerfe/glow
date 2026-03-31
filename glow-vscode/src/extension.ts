@@ -171,17 +171,6 @@ export function activate(context: vscode.ExtensionContext) {
       if (!isShaderDocument(e.document)) return;
       const key = e.document.uri.toString();
       if (!glow.isPreviewActive(key)) return;
-      const diagnostics = vscode.languages.getDiagnostics(e.document.uri);
-      var hasError = false;
-      for (const d of diagnostics) {
-        if (d.severity == vscode.DiagnosticSeverity.Error) {
-          hasError = true;
-          break;
-        }
-      }
-      if (hasError) {
-        return;
-      }
       scheduleUpdate(key, () => {
         glow.updatePreview(key, e.document.uri.fsPath, e.document.getText());
       });
