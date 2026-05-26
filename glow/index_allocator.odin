@@ -1,6 +1,5 @@
 package glow
 
-
 IndexAllocator :: struct {
 	max:  uint,
 	used: map[uint]bool,
@@ -21,3 +20,4 @@ free_index :: proc(ia: ^IndexAllocator, index: uint) {
 		ia.used[index] = false
 	}
 }
+

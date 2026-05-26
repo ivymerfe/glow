@@ -1,4 +1,4 @@
-package glowr
+package rend
 
 import "../slang"
 import refl "../slang/reflection_wrapper"
@@ -377,3 +377,4 @@ create_pipeline :: proc(
 	vk_try(vk.CreateGraphicsPipelines(prog.device, 0, 1, &pipeline_info, nil, &pipeline))
 	return
 }
+

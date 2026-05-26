@@ -1,4 +1,4 @@
-package glowr
+package rend
 
 import "core:log"
 import os "core:os"
@@ -125,3 +125,4 @@ create_image_view_2d :: proc(
 	vk_try(vk.CreateImageView(vkc.device, &create_info, nil, &view))
 	return
 }
+

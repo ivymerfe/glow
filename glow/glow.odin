@@ -1,17 +1,17 @@
 package glow
 
+import "../gwin"
+import "../rend"
 import "core:log"
 import "core:sync"
 import "core:thread"
 import "core:time"
-import "glowr"
-import "gwin"
 import vk "vendor:vulkan"
 
 GlowRenderer :: struct {
 	instance:        vk.Instance,
-	vkc:             glowr.VulkanContext,
-	res:             glowr.ResourceManager,
+	vkc:             rend.VulkanContext,
+	res:             rend.ResourceManager,
 	window_indexes:  IndexAllocator,
 	windows:         map[u32]^GlowWindow,
 	timer:           time.Stopwatch,
@@ -24,7 +24,7 @@ GlowRenderer :: struct {
 }
 
 create_glow :: proc(r: ^GlowRenderer) {
-	r.instance = glowr.create_vk_instance(g_options.debug)
+	r.instance = rend.create_vk_instance(g_options.debug)
 	r.window_indexes.max = g_options.max_windows
 
 	r.running = true
@@ -44,8 +44,8 @@ destroy_glow :: proc(r: ^GlowRenderer) {
 		for _, win in r.windows {
 			destroy_window(win)
 		}
-		glowr.destroy_resource_manager(&r.res)
-		glowr.destroy_vulkan_context(&r.vkc)
+		rend.destroy_resource_manager(&r.res)
+		rend.destroy_vulkan_context(&r.vkc)
 	}
 	if r.instance != {} {
 		vk.DestroyInstance(r.instance, nil)
@@ -54,8 +54,8 @@ destroy_glow :: proc(r: ^GlowRenderer) {
 
 glow_ensure_context :: proc(r: ^GlowRenderer, surface: vk.SurfaceKHR) {
 	if r.vkc == {} {
-		r.vkc = glowr.create_vulkan_context(r.instance, surface)
-		glowr.create_resource_manager(
+		r.vkc = rend.create_vulkan_context(r.instance, surface)
+		rend.create_resource_manager(
 			&r.res,
 			r.vkc,
 			g_options.width,
@@ -114,12 +114,12 @@ render_window :: proc(r: ^GlowRenderer, win: ^GlowWindow) -> bool {
 	tick_window_input(win, current_time)
 
 	constants := get_window_constants(win, current_time)
-	render_info := glowr.RenderInfo {
+	render_info := rend.RenderInfo {
 		dst_width  = u32(width),
 		dst_height = u32(height),
 		constants  = constants,
 	}
-	if glowr.render(&win.ren, &render_info, prog) {
+	if rend.render(&win.ren, &render_info, prog) {
 		win.frame_index += 1
 		return true
 	}
@@ -137,7 +137,7 @@ should_render :: proc(win: ^GlowWindow) -> bool {
 render_proc :: proc(raw: rawptr) {
 	r := cast(^GlowRenderer)raw
 
-	push: glowr.PushConstants
+	push: rend.PushConstants
 	fences := make([dynamic]vk.Fence)
 	for sync.atomic_load(&r.running) {
 		clear(&fences)
@@ -151,7 +151,7 @@ render_proc :: proc(raw: rawptr) {
 
 		rendered := false
 		if len(fences) > 0 {
-			glowr.vk_try(
+			rend.vk_try(
 				vk.WaitForFences(
 					r.vkc.device,
 					u32(len(fences)),
@@ -161,9 +161,9 @@ render_proc :: proc(raw: rawptr) {
 				),
 			)
 			sync.shared_lock(&r.mtx)
-			glowr.prepare_resources(&r.res)
+			rend.prepare_resources(&r.res)
 			for _, win in r.windows {
-				if should_render(win) && glowr.is_renderer_ready(&win.ren) {
+				if should_render(win) && rend.is_renderer_ready(&win.ren) {
 					rendered |= render_window(r, win)
 				}
 			}
@@ -187,8 +187,8 @@ window_program_compiler_proc :: proc(raw: rawptr) {
 		for _, win in r.windows {
 			if pbuf_should_recompile(&win.pbuf) {
 				path, source, version := pbuf_get_source(&win.pbuf)
-				prog: glowr.Program
-				success := glowr.compile_program(
+				prog: rend.Program
+				success := rend.compile_program(
 					&prog,
 					&r.res,
 					g_slang,
@@ -205,3 +205,4 @@ window_program_compiler_proc :: proc(raw: rawptr) {
 		sync.shared_unlock(&r.mtx)
 	}
 }
+

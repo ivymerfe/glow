@@ -1,4 +1,4 @@
-package glowr
+package rend
 
 import "core:log"
 import vk "vendor:vulkan"
@@ -438,3 +438,4 @@ choose_swapchain_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentM
 	// }
 	return .FIFO
 }
+

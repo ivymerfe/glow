@@ -6,12 +6,11 @@ import "core:log"
 import "core:os"
 import "core:sync"
 import "core:sys/linux"
-import "core:thread"
 import "core:time"
 
-import "glowr"
-import "gwin"
-import "slang"
+import "../gwin"
+import "../rend"
+import "../slang"
 
 g_slang: ^slang.IGlobalSession
 g_wayland: gwin.WaylandContext
@@ -56,7 +55,7 @@ main :: proc() {
 	log.infof("Wl init -> %.2f ms", wl_init_time)
 
 	slang_init_start := time.now()
-	glowr.slang_check(slang.createGlobalSession(slang.API_VERSION, &g_slang))
+	rend.slang_check(slang.createGlobalSession(slang.API_VERSION, &g_slang))
 	slang_init_time := time.duration_milliseconds(time.diff(slang_init_start, time.now()))
 	log.infof("Slang init -> %.2f ms", slang_init_time)
 
@@ -97,7 +96,7 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 	}
 	#partial switch event in event_union {
 	case gwin.EventKeyDown:
-		key, ok := map_xkb_keysym(event.keysym)
+		key, ok := map_xkb_keysym(event.key)
 		if !ok {
 			break
 		}
@@ -124,14 +123,14 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 			on_window_input(win, key, true)
 		}
 	case gwin.EventKeyUp:
-		key, ok := map_xkb_keysym(event.keysym)
+		key, ok := map_xkb_keysym(event.key)
 		if ok {
 			on_window_input(win, key, false)
 		}
 	case gwin.EventKeyboardLeave:
 		on_window_keyboard_leave(win)
 	case gwin.EventPointerEnter:
-		on_window_pointer_enter(win, event.x, event.y)
+		on_window_pointer_enter(win, event.pointer, event.x, event.y)
 	case gwin.EventPointerMotion:
 		on_window_pointer_motion(win, event.x, event.y)
 	case gwin.EventPointerRelative:
@@ -139,7 +138,7 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 	case gwin.EventPointerButton:
 		button, ok := map_wayland_mouse_button(event.button)
 		if ok {
-			on_window_input(win, button, event.pressed)
+			on_window_pointer_button(win, event.pointer, button, event.pressed)
 		}
 	case gwin.EventPointerScroll:
 		on_window_pointer_scroll(win, event.dx, event.dy)
@@ -182,3 +181,4 @@ shutdown :: proc() {
 	gwin.destroy_wayland_context(&g_wayland)
 	log.info("Goodbye")
 }
+

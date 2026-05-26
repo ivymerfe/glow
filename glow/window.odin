@@ -4,8 +4,8 @@ import "core:log"
 import "core:math"
 import "core:sync"
 
-import "glowr"
-import "gwin"
+import "../gwin"
+import "../rend"
 import vk "vendor:vulkan"
 
 CAMERA_SPEED_MIN :: f32(0.25)
@@ -15,7 +15,7 @@ GlowWindow :: struct {
 	glow:             ^GlowRenderer,
 	id:               u32,
 	native:           ^gwin.WaylandWindow,
-	ren:              glowr.Renderer,
+	ren:              rend.Renderer,
 	pbuf:             ProgramBuffer,
 	index:            uint,
 	visible:          bool,
@@ -46,6 +46,7 @@ create_window :: proc(glow: ^GlowRenderer, window_id: u32, win: ^GlowWindow) {
 		&g_wayland,
 		window_id,
 		"glow",
+		"glow",
 		640,
 		360,
 		f32(g_options.width),
@@ -56,28 +57,43 @@ create_window :: proc(glow: ^GlowRenderer, window_id: u32, win: ^GlowWindow) {
 	}
 	win.native = native
 
-	surface, ok := gwin.create_vulkan_surface(native, glow.instance)
+	surface, ok := create_vulkan_surface(native, glow.instance)
 	if !ok {
 		log.panic("Failed to create Vulkan surface")
 	}
 	glow_ensure_context(glow, surface)
-	win.ren = glowr.create_renderer(
-		glow.vkc,
-		&glow.res,
-		surface,
-		g_options.width,
-		g_options.height,
-	)
+	win.ren = rend.create_renderer(glow.vkc, &glow.res, surface, g_options.width, g_options.height)
 	win.visible = true
 	win.active = true
 	win.camera_speed = 4.0
 }
 
 destroy_window :: proc(win: ^GlowWindow) {
-	glowr.wait_renderer(&win.ren)
-	glowr.destroy_renderer(&win.ren)
+	rend.wait_renderer(&win.ren)
+	rend.destroy_renderer(&win.ren)
 	free_index(&win.glow.window_indexes, win.index)
 	gwin.destroy_window(win.native)
+}
+
+create_vulkan_surface :: proc(
+	win: ^gwin.WaylandWindow,
+	instance: vk.Instance,
+) -> (
+	vk.SurfaceKHR,
+	bool,
+) {
+	wl_surface_info := vk.WaylandSurfaceCreateInfoKHR {
+		sType   = .WAYLAND_SURFACE_CREATE_INFO_KHR,
+		display = auto_cast win.ctx.display,
+		surface = auto_cast win.surface,
+	}
+	vk_surface: vk.SurfaceKHR
+	result := vk.CreateWaylandSurfaceKHR(instance, &wl_surface_info, nil, &vk_surface)
+	if result != .SUCCESS {
+		log.errorf("Failed to create Vulkan surface: %v", result)
+		return {}, false
+	}
+	return vk_surface, true
 }
 
 set_window_visible :: proc(win: ^GlowWindow, visible: bool) {
@@ -94,23 +110,9 @@ set_window_active :: proc(win: ^GlowWindow, active: bool) {
 
 set_window_fullscreen :: proc(win: ^GlowWindow, fullscreen: bool) {
 	gwin.set_window_fullscreen(win.native, fullscreen)
-	if !fullscreen {
-		set_camera_active(win, false)
-	}
 }
 
-set_camera_active :: proc(win: ^GlowWindow, active: bool) {
-	win.is_camera_active = active
-	gwin.set_window_pointer_lock(win.native, win.is_camera_active)
-}
-
-on_window_input :: proc(win: ^GlowWindow, key: u32, pressed: bool) {
-	if key == KEY_MOUSE_RIGHT && pressed {
-		if win.pbuf.prog.camera.required {
-			set_camera_active(win, !win.is_camera_active)
-			return
-		}
-	}
+update_key_state :: proc(win: ^GlowWindow, key: u32, pressed: bool) {
 	idx := key >> 5
 	mask := u32(1) << (key & 31)
 	if pressed {
@@ -118,7 +120,10 @@ on_window_input :: proc(win: ^GlowWindow, key: u32, pressed: bool) {
 	} else {
 		win.input[idx] &= ~mask
 	}
+}
 
+on_window_input :: proc(win: ^GlowWindow, key: u32, pressed: bool) {
+	update_key_state(win, key, pressed)
 	dir: f32 = pressed ? 1 : -1
 	switch key {
 	case KEY_W:
@@ -136,17 +141,30 @@ on_window_input :: proc(win: ^GlowWindow, key: u32, pressed: bool) {
 	}
 }
 
+on_window_pointer_button :: proc(
+	win: ^GlowWindow,
+	pointer: ^gwin.WaylandPointer,
+	key: u32,
+	pressed: bool,
+) {
+	update_key_state(win, key, pressed)
+	if key == KEY_MOUSE_RIGHT && pressed {
+		if win.pbuf.prog.camera.required {
+			win.is_camera_active = !win.is_camera_active
+			gwin.lock_pointer(pointer, win.is_camera_active, win.native)
+			return
+		}
+	}
+}
+
 on_window_keyboard_leave :: proc(win: ^GlowWindow) {
 	win.input = [4]u32{}
 	win.camera_movement = [3]f32{}
 }
 
-on_window_pointer_enter :: proc(win: ^GlowWindow, x: f32, y: f32) {
+on_window_pointer_enter :: proc(win: ^GlowWindow, pointer: ^gwin.WaylandPointer, x: f32, y: f32) {
 	win.mouse_x = x / f32(win.native.width)
 	win.mouse_y = y / f32(win.native.height)
-	if win.native.fullscreen && win.pbuf.prog.camera.required {
-		set_camera_active(win, true)
-	}
 }
 
 on_window_pointer_motion :: proc(win: ^GlowWindow, x: f32, y: f32) {
@@ -187,7 +205,7 @@ on_window_pointer_scroll :: proc(win: ^GlowWindow, dx: f32, dy: f32) {
 	}
 }
 
-get_window_constants :: proc(win: ^GlowWindow, time: f32) -> glowr.PushConstants {
+get_window_constants :: proc(win: ^GlowWindow, time: f32) -> rend.PushConstants {
 	ys := math.sin(win.yaw)
 	yc := math.cos(win.yaw)
 	ps := math.sin(win.pitch)
@@ -197,7 +215,7 @@ get_window_constants :: proc(win: ^GlowWindow, time: f32) -> glowr.PushConstants
 	right := [3]f32{yc, 0, -ys}
 	up := [3]f32{-ys * ps, pc, -yc * ps}
 
-	return glowr.PushConstants {
+	return rend.PushConstants {
 		position = win.camera_pos,
 		forward = forward,
 		right = right,
@@ -227,3 +245,4 @@ tick_window_input :: proc(win: ^GlowWindow, time: f32) {
 	win.camera_pos[1] += y_delta
 	win.camera_pos[2] += z_delta
 }
+

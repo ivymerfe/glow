@@ -1,4 +1,4 @@
-package glowr
+package rend
 
 import "core:log"
 import vk "vendor:vulkan"
@@ -272,3 +272,4 @@ create_pipeline_layout :: proc(res: ^ResourceManager) {
 	}
 	vk_try(vk.CreatePipelineLayout(res.device, &layout_info, nil, &res.pipeline_layout))
 }
+

@@ -1,12 +1,12 @@
 package glow
 
+import "../slang"
 import "core:log"
 import "core:os/os2"
 import "core:slice"
 import "core:strings"
 import "core:thread"
 import "core:time"
-import "slang"
 
 CompilationTarget :: enum u8 {
 	SlangModule,
@@ -143,3 +143,4 @@ compiler_proc :: proc(raw: rawptr) {
 		log.infof("%v[%s] compiled in %.2f ms", target, path, compile_time)
 	}
 }
+

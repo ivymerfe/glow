@@ -1,4 +1,4 @@
-package glowr
+package rend
 
 import "core:log"
 import "core:slice"
@@ -42,3 +42,4 @@ create_slang_session :: proc(global: ^slang.IGlobalSession) -> (session: ^slang.
 	slang_check(global->createSession(session_desc, &session))
 	return
 }
+

@@ -1,11 +1,11 @@
 package glow
 
+import "../rend"
 import "core:sync"
-import "glowr"
 
 ProgramBuffer :: struct {
-	prog:            glowr.Program,
-	next:            glowr.Program,
+	prog:            rend.Program,
+	next:            rend.Program,
 	should_swap:     bool,
 	ready:           bool,
 	mtx:             sync.Mutex,
@@ -19,8 +19,8 @@ ProgramBuffer :: struct {
 pbuf_render_done :: proc(pb: ^ProgramBuffer) {
 	if sync.atomic_load(&pb.should_swap) {
 		sync.lock(&pb.mtx)
-		glowr.inherit_program_state(&pb.next, &pb.prog)
-		glowr.destroy_program(&pb.prog)
+		rend.inherit_program_state(&pb.next, &pb.prog)
+		rend.destroy_program(&pb.prog)
 		pb.prog = pb.next
 		pb.next = {}
 		sync.atomic_store(&pb.should_swap, false)
@@ -28,10 +28,10 @@ pbuf_render_done :: proc(pb: ^ProgramBuffer) {
 	}
 }
 
-pbuf_compile_done :: proc(pb: ^ProgramBuffer, success: bool, prog: glowr.Program, version: int) {
+pbuf_compile_done :: proc(pb: ^ProgramBuffer, success: bool, prog: rend.Program, version: int) {
 	if success {
 		sync.lock(&pb.mtx)
-		glowr.destroy_program(&pb.next)
+		rend.destroy_program(&pb.next)
 		pb.next = prog
 		sync.atomic_store(&pb.should_swap, true)
 		sync.atomic_store(&pb.ready, true)
@@ -57,3 +57,4 @@ pbuf_update_source :: proc(pb: ^ProgramBuffer, path: string, source: string) {
 	sync.atomic_add(&pb.source_version, 1)
 	sync.unlock(&pb.source_mtx)
 }
+

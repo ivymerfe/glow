@@ -1,4 +1,4 @@
-package glowr
+package rend
 
 import "base:runtime"
 import "core:dynlib"
@@ -235,3 +235,4 @@ find_queue_family_indexes :: proc(vkc: ^VulkanContext, surface: vk.SurfaceKHR) -
 	}
 	return false
 }
+
