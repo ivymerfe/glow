@@ -1,52 +1,54 @@
 package glow
 
-import "core:os"
-
-MessageType :: enum {
-	WINDOW_CLOSED,
-	WINDOW_VISIBLE,
+MessageType :: enum u8 {
+	WINDOW_CLOSED  = 0,
+	WINDOW_VISIBLE = 1,
 }
 
-msg_window_destroyed :: proc(window_id: u32) {
-	msg_data_u32(5) // 5 bytes
-	msg_data_u8(u8(MessageType.WINDOW_CLOSED))
-	msg_data_u32(window_id)
+MSG_MAX :: 512
+
+Message :: struct {
+	buf: [MSG_MAX]u8,
+	len: int,
 }
 
-msg_window_visible :: proc(window_id: u32, visible: bool) {
-	msg_data_u32(6) // 6 bytes
-	msg_data_u8(u8(MessageType.WINDOW_VISIBLE))
-	msg_data_u32(window_id)
-	msg_data_u8(u8(visible))
+msg_window_destroyed :: proc(msg: ^Message, window_id: u32) {
+	msg_write_u8(msg, u8(MessageType.WINDOW_CLOSED))
+	msg_write_u32(msg, window_id)
+	msg_finish(msg)
 }
 
-g_out: [dynamic]u8
-g_out_offset: int
-
-ensure_out_bytes :: proc(num_bytes: int) {
-	needed_len := g_out_offset + num_bytes
-	if len(g_out) < needed_len {
-		resize(&g_out, needed_len)
-	}
+msg_window_visible :: proc(msg: ^Message, window_id: u32, visible: bool) {
+	msg_write_u8(msg, u8(MessageType.WINDOW_VISIBLE))
+	msg_write_u32(msg, window_id)
+	msg_write_u8(msg, u8(visible))
+	msg_finish(msg)
 }
 
-send_messages :: proc() {
-	os.write(os.stdout, g_out[:g_out_offset])
-	g_out_offset = 0
+@(private)
+msg_write_u8 :: proc(b: ^Message, v: u8) {
+	ensure(b.len + 1 + 4 <= MSG_MAX, "MsgBuilder overflow")
+	b.buf[4 + b.len] = v
+	b.len += 1
 }
 
-msg_data_u8 :: proc(value: u8) {
-	ensure_out_bytes(1)
-	g_out[g_out_offset] = value
-	g_out_offset += 1
+@(private)
+msg_write_u32 :: proc(msg: ^Message, v: u32) {
+	ensure(msg.len + 4 + 4 <= MSG_MAX, "MsgBuilder overflow")
+	off := 4 + msg.len
+	msg.buf[off + 0] = u8(v & 0xff)
+	msg.buf[off + 1] = u8((v >> 8) & 0xff)
+	msg.buf[off + 2] = u8((v >> 16) & 0xff)
+	msg.buf[off + 3] = u8((v >> 24) & 0xff)
+	msg.len += 4
 }
 
-msg_data_u32 :: proc(value: u32) {
-	ensure_out_bytes(4)
-	g_out[g_out_offset + 0] = u8(value & 0xff)
-	g_out[g_out_offset + 1] = u8((value >> 8) & 0xff)
-	g_out[g_out_offset + 2] = u8((value >> 16) & 0xff)
-	g_out[g_out_offset + 3] = u8((value >> 24) & 0xff)
-	g_out_offset += 4
+@(private)
+msg_finish :: proc(msg: ^Message) {
+	sz := u32(msg.len)
+	msg.buf[0] = u8(sz & 0xff)
+	msg.buf[1] = u8((sz >> 8) & 0xff)
+	msg.buf[2] = u8((sz >> 16) & 0xff)
+	msg.buf[3] = u8((sz >> 24) & 0xff)
 }
 

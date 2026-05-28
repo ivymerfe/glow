@@ -15,6 +15,8 @@ import "../slang"
 g_slang: ^slang.IGlobalSession
 g_wayland: gwin.WaylandContext
 g_renderer: GlowRenderer
+g_epoll: EPollController
+g_server: GlowServer
 
 Options :: struct {
 	width:       uint `usage:"Buffer width"`,
@@ -42,9 +44,8 @@ main :: proc() {
 	}
 
 	log_level := g_options.debug ? log.Level.Debug : log.Level.Info
-	context.logger = log.create_file_logger(os.stderr, log_level, {.Level, .Procedure})
+	context.logger = log.create_console_logger(log_level, {.Level, .Procedure})
 
-	init_input()
 	init_keymap()
 
 	launch_time := time.now()
@@ -64,29 +65,39 @@ main :: proc() {
 	glow_init_time := time.duration_milliseconds(time.diff(glow_init_start, time.now()))
 	log.infof("Glow init -> %.2fms", glow_init_time)
 
+	epoll_init(&g_epoll)
+	server_init(&g_server, &g_epoll, command_handler)
+
 	wayland_fd := gwin.get_display_fd(&g_wayland)
-	fds: [2]linux.Poll_Fd
-	fds[0] = linux.Poll_Fd {
-		fd     = linux.Fd(wayland_fd),
-		events = {.IN},
-	}
-	fds[1] = linux.Poll_Fd {
-		fd     = linux.STDIN_FILENO,
-		events = {.IN},
-	}
+	epoll_add(
+		&g_epoll,
+		linux.Fd(wayland_fd),
+		{.IN},
+		proc(fd: linux.Fd, ev: linux.EPoll_Event_Set, data: rawptr) {
+			if ev & {.IN} != {} {
+				gwin.dispatch_events(&g_wayland)
+			}
+		},
+		&g_wayland,
+	)
 	for {
-		n, err := linux.poll(fds[:], -1)
-		if err != .NONE {
+		if !epoll_poll(&g_epoll) {
 			log.panic("poll failed")
-		}
-		if fds[0].revents & {.IN} != {} {
-			gwin.dispatch_events(&g_wayland)
-		}
-		if fds[1].revents & {.IN} != {} {
-			poll_commands(command_handler)
 		}
 	}
 	shutdown()
+}
+
+broadcast_window_destroyed :: proc(window_id: u32) {
+	msg: Message
+	msg_window_destroyed(&msg, window_id)
+	server_broadcast(&g_server, &msg)
+}
+
+broadcast_window_visible :: proc(window_id: u32, visible: bool) {
+	msg: Message
+	msg_window_visible(&msg, window_id, visible)
+	server_broadcast(&g_server, &msg)
 }
 
 event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent) {
@@ -103,16 +114,14 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 		switch key {
 		case KEY_Q:
 			glow_destroy_window(&g_renderer, native.id)
-			msg_window_destroyed(native.id)
-			send_messages()
+			broadcast_window_destroyed(native.id)
 		case KEY_E:
 			set_window_fullscreen(win, !native.fullscreen)
 		case KEY_ESCAPE:
 			set_window_fullscreen(win, false)
 		case KEY_H:
 			set_window_visible(win, false)
-			msg_window_visible(win.id, false)
-			send_messages()
+			broadcast_window_visible(win.id, false)
 		case KEY_P:
 			active := !sync.atomic_load(&win.active)
 			set_window_active(win, active)

@@ -2,7 +2,6 @@ package glow
 
 import "core:log"
 import "core:os"
-import "core:sys/windows"
 
 GlowCommandType :: enum u8 {
 	WINDOW_CREATE,
@@ -98,36 +97,6 @@ read_string :: proc(data: []u8, cursor: ^int) -> string {
 	return str
 }
 
-stdin_has_data :: proc() -> bool {
-	when ODIN_OS == .Windows {
-		res := windows.WaitForSingleObject(windows.GetStdHandle(windows.STD_INPUT_HANDLE), 0)
-		return res == windows.WAIT_OBJECT_0
-	}
-	return true
-}
-
-read_more_into_buffer :: proc() -> bool {
-	if !stdin_has_data() {
-		return false
-	}
-	need_len := g_in_used + READ_CHUNK
-	if len(g_in) < need_len {
-		resize(&g_in, need_len)
-	}
-
-	n, err := os.read(os.stdin, g_in[g_in_used:g_in_used + READ_CHUNK])
-	if err == os.EAGAIN {
-		return false
-	}
-	ensure(err == nil, "Failed to read from stdin")
-
-	if n <= 0 {
-		return false
-	}
-	g_in_used += n
-	return true
-}
-
 decode_command :: proc(typ: GlowCommandType, payload: []u8) -> GlowCommand {
 	c := 0
 
@@ -177,42 +146,3 @@ decode_command :: proc(typ: GlowCommandType, payload: []u8) -> GlowCommand {
 	log.panic("Unknown command type")
 }
 
-process_buffer :: proc(cb: Command_Callback) {
-	consume := 0
-
-	for {
-		available := g_in_used - consume
-		if available < HEADER_SIZE {
-			break
-		}
-
-		typ := GlowCommandType(g_in[consume])
-		payload_size := int(parse_u32_le(g_in[consume + 1:consume + 5]))
-		ensure(payload_size >= 0 && payload_size <= MAX_FRAME_SIZE, "Invalid payload size")
-
-		total := HEADER_SIZE + payload_size
-		if available < total {
-			break
-		}
-
-		payload := g_in[consume + HEADER_SIZE:consume + total]
-		cmd := decode_command(typ, payload)
-		cb(cmd)
-
-		consume += total
-	}
-
-	if consume > 0 {
-		remaining := g_in_used - consume
-		if remaining > 0 {
-			copy(g_in[0:remaining], g_in[consume:g_in_used])
-		}
-		g_in_used = remaining
-	}
-}
-
-poll_commands :: proc(cb: Command_Callback) {
-	for read_more_into_buffer() {}
-
-	process_buffer(cb)
-}
