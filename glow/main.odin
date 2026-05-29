@@ -101,7 +101,7 @@ broadcast_window_visible :: proc(window_id: u32, visible: bool) {
 }
 
 event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent) {
-	win := glow_get_window(&g_renderer, native.id)
+	win := cast(^GlowWindow)native.data
 	if win == nil {
 		return
 	}
@@ -113,15 +113,14 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 		}
 		switch key {
 		case KEY_Q:
-			glow_destroy_window(&g_renderer, native.id)
-			broadcast_window_destroyed(native.id)
+			glow_destroy_window(&g_renderer, win)
+			broadcast_window_destroyed()
 		case KEY_E:
 			set_window_fullscreen(win, !native.fullscreen)
 		case KEY_ESCAPE:
 			set_window_fullscreen(win, false)
 		case KEY_H:
 			set_window_visible(win, false)
-			broadcast_window_visible(win.id, false)
 		case KEY_P:
 			active := !sync.atomic_load(&win.active)
 			set_window_active(win, active)
@@ -156,27 +155,24 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 
 command_handler :: proc(cmd_union: GlowCommand) {
 	switch cmd in cmd_union {
-	case CmdWindowCreate:
-		glow_new_window(&g_renderer, cmd.window_id)
-	case CmdWindowDestroy:
-		glow_destroy_window(&g_renderer, cmd.window_id)
-	case CmdWindowVisible:
-		win := glow_get_window(&g_renderer, cmd.window_id)
-		if win != nil {
-			set_window_visible(win, cmd.visible)
+	case CmdShaderSource:
+		win := g_renderer.windows[cmd.path]
+		if win == nil {
+			win = glow_new_window(&g_renderer, cmd.path)
 		}
-	case CmdWindowToggleFullscreen:
-		win := glow_get_window(&g_renderer, cmd.window_id)
+		pbuf_update_source(&win.pbuf, cmd.path, cmd.source)
+		compiler_wakeup(&g_renderer)
+	case CmdToggleFullscreen:
+		win := g_renderer.windows[cmd.path]
 		if win != nil {
 			gwin.set_window_fullscreen(win.native, !win.native.fullscreen)
 		}
-	case CmdWindowProgram:
-		win := glow_get_window(&g_renderer, cmd.window_id)
+	case CmdRemoveShader:
+		win := g_renderer.windows[cmd.path]
 		if win != nil {
-			pbuf_update_source(&win.pbuf, cmd.path, cmd.source)
-			compiler_wakeup(&g_renderer)
+			glow_destroy_window(&g_renderer, win)
 		}
-	case CmdCompileProgram:
+	case CmdCompileShader:
 		run_compiler_thread(cmd.target, cmd.path, cmd.source, cmd.dst_path)
 	}
 }

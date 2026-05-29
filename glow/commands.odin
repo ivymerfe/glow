@@ -4,33 +4,26 @@ import "core:log"
 import "core:os"
 
 GlowCommandType :: enum u8 {
-	WINDOW_CREATE,
-	WINDOW_DESTROY,
-	WINDOW_VISIBLE,
-	WINDOW_FULLSCREEN,
-	WINDOW_PROGRAM,
-	COMPILE_PROGRAM,
+	SHADER_SOURCE,
+	TOGGLE_FULLSCREEN,
+	REMOVE_SHADER,
+	COMPILE_SHADER,
 }
 
-CmdWindowCreate :: struct {
-	window_id: u32,
+CmdShaderSource :: struct {
+	path:   string,
+	source: string,
 }
-CmdWindowDestroy :: struct {
-	window_id: u32,
+
+CmdToggleFullscreen :: struct {
+	path: string,
 }
-CmdWindowVisible :: struct {
-	window_id: u32,
-	visible:   bool,
+
+CmdRemoveShader :: struct {
+	path: string,
 }
-CmdWindowToggleFullscreen :: struct {
-	window_id: u32,
-}
-CmdWindowProgram :: struct {
-	window_id: u32,
-	path:      string,
-	source:    string,
-}
-CmdCompileProgram :: struct {
+
+CmdCompileShader :: struct {
 	target:   CompilationTarget,
 	path:     string,
 	source:   string,
@@ -38,12 +31,10 @@ CmdCompileProgram :: struct {
 }
 
 GlowCommand :: union {
-	CmdWindowCreate,
-	CmdWindowDestroy,
-	CmdWindowVisible,
-	CmdWindowToggleFullscreen,
-	CmdWindowProgram,
-	CmdCompileProgram,
+	CmdShaderSource,
+	CmdToggleFullscreen,
+	CmdRemoveShader,
+	CmdCompileShader,
 }
 
 Command_Callback :: proc(cmd: GlowCommand)
@@ -58,11 +49,7 @@ init_input :: proc() {
 }
 
 HEADER_SIZE :: 5 // u8 type + u32 payload_size_le
-READ_CHUNK :: 8192
 MAX_FRAME_SIZE :: 64 * 1024 * 1024
-
-g_in: [dynamic]u8
-g_in_used: int
 
 parse_u32_le :: proc(data: []u8) -> u32 {
 	ensure(len(data) >= 4, "Data too small to parse u32")
@@ -101,47 +88,29 @@ decode_command :: proc(typ: GlowCommandType, payload: []u8) -> GlowCommand {
 	c := 0
 
 	switch typ {
-	case .WINDOW_CREATE:
-		window_id := read_u32_le_cursor(payload, &c)
-		ensure(c == len(payload), "Extra bytes in WINDOW_CREATE payload")
-		return CmdWindowCreate{window_id = window_id}
-
-	case .WINDOW_DESTROY:
-		window_id := read_u32_le_cursor(payload, &c)
-		ensure(c == len(payload), "Extra bytes in WINDOW_DESTROY payload")
-		return CmdWindowDestroy{window_id = window_id}
-
-	case .WINDOW_VISIBLE:
-		window_id := read_u32_le_cursor(payload, &c)
-		visible_u8 := read_u8(payload, &c)
-		ensure(c == len(payload), "Extra bytes in WINDOW_VISIBLE payload")
-		return CmdWindowVisible{window_id = window_id, visible = visible_u8 != 0}
-
-	case .WINDOW_FULLSCREEN:
-		window_id := read_u32_le_cursor(payload, &c)
-		ensure(c == len(payload), "Extra bytes in WINDOW_FULLSCREEN payload")
-		return CmdWindowToggleFullscreen{window_id = window_id}
-
-	case .WINDOW_PROGRAM:
-		window_id := read_u32_le_cursor(payload, &c)
+	case .SHADER_SOURCE:
 		path := read_string(payload, &c)
 		source := read_string(payload, &c)
+		ensure(c == len(payload), "Extra bytes in SHADER_SOURCE")
+		return CmdShaderSource{path = path, source = source}
 
-		ensure(c == len(payload), "Extra bytes in WINDOW_PROGRAM payload")
-		return CmdWindowProgram{window_id = window_id, path = path, source = source}
+	case .TOGGLE_FULLSCREEN:
+		path := read_string(payload, &c)
+		ensure(c == len(payload), "Extra bytes in TOGGLE_FULLSCREEN")
+		return CmdToggleFullscreen{path = path}
 
-	case .COMPILE_PROGRAM:
+	case .REMOVE_SHADER:
+		path := read_string(payload, &c)
+		ensure(c == len(payload), "Extra bytes in REMOVE_SHADER")
+		return CmdRemoveShader{path = path}
+
+	case .COMPILE_SHADER:
 		target := cast(CompilationTarget)read_u32_le_cursor(payload, &c)
 		path := read_string(payload, &c)
 		source := read_string(payload, &c)
 		dst_path := read_string(payload, &c)
 		ensure(c == len(payload), "Extra bytes in COMPILE_MODULE payload")
-		return CmdCompileProgram {
-			target = target,
-			path = path,
-			source = source,
-			dst_path = dst_path,
-		}
+		return CmdCompileShader{target = target, path = path, source = source, dst_path = dst_path}
 	}
 	log.panic("Unknown command type")
 }

@@ -1,3 +1,4 @@
+
 package glow
 
 MessageType :: enum u8 {

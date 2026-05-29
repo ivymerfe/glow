@@ -13,7 +13,7 @@ GlowRenderer :: struct {
 	vkc:             rend.VulkanContext,
 	res:             rend.ResourceManager,
 	window_indexes:  IndexAllocator,
-	windows:         map[u32]^GlowWindow,
+	windows:         map[string]^GlowWindow,
 	timer:           time.Stopwatch,
 	render_thread:   ^thread.Thread,
 	mtx:             sync.RW_Mutex,
@@ -73,33 +73,26 @@ compiler_wakeup :: proc(r: ^GlowRenderer) {
 	sync.auto_reset_event_signal(&r.compiler_signal)
 }
 
-glow_new_window :: proc(r: ^GlowRenderer, window_id: u32) {
-	_, ok := r.windows[window_id]
+glow_new_window :: proc(r: ^GlowRenderer, path: string) -> ^GlowWindow {
+	win, ok := r.windows[path]
 	if ok {
-		return
+		return win
 	}
-	win := new(GlowWindow)
-	create_window(r, window_id, win)
+	win = new(GlowWindow)
+	create_window(r, path, win)
 
 	sync.lock(&r.mtx)
-	r.windows[window_id] = win
+	r.windows[path] = win
 	sync.unlock(&r.mtx)
+	return win
 }
 
-glow_destroy_window :: proc(r: ^GlowRenderer, window_id: u32) {
-	win := r.windows[window_id]
-	if win == nil {
-		return
-	}
+glow_destroy_window :: proc(r: ^GlowRenderer, win: ^GlowWindow) {
 	sync.lock(&r.mtx)
 	destroy_window(win)
-	delete_key(&r.windows, window_id)
+	delete_key(&r.windows, win.path)
 	sync.unlock(&r.mtx)
 	free(win)
-}
-
-glow_get_window :: proc(r: ^GlowRenderer, window_id: u32) -> ^GlowWindow {
-	return r.windows[window_id]
 }
 
 render_window :: proc(r: ^GlowRenderer, win: ^GlowWindow) -> bool {

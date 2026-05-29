@@ -13,7 +13,7 @@ CAMERA_SPEED_MAX :: f32(64.0)
 
 GlowWindow :: struct {
 	glow:             ^GlowRenderer,
-	id:               u32,
+	path:             string,
 	native:           ^gwin.WaylandWindow,
 	ren:              rend.Renderer,
 	pbuf:             ProgramBuffer,
@@ -33,24 +33,24 @@ GlowWindow :: struct {
 	last_update_time: f32,
 }
 
-create_window :: proc(glow: ^GlowRenderer, window_id: u32, win: ^GlowWindow) {
+create_window :: proc(glow: ^GlowRenderer, path: string, win: ^GlowWindow) {
 	win.glow = glow
-	win.id = window_id
+	win.path = path
 	index, index_success := alloc_index(&glow.window_indexes)
 	if !index_success {
-		log.panicf("Failed to allocate window index for %u", window_id)
+		log.panicf("Failed to allocate window index for %u", path)
 	}
 	win.index = index
 
 	native, wl_success := gwin.create_window(
 		&g_wayland,
-		window_id,
 		"glow",
 		"glow",
 		640,
 		360,
 		f32(g_options.width),
 		f32(g_options.height),
+		win,
 	)
 	if !wl_success {
 		log.panic("Failed to create Wayland window")
