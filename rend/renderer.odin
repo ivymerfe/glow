@@ -142,7 +142,7 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> b
 	acquire_result := vk.AcquireNextImageKHR(
 		ren.device,
 		swapchain.h,
-		60,
+		max(u64),
 		sem_image_available,
 		{},
 		&image_index,
