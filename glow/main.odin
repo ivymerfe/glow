@@ -14,7 +14,7 @@ import "../slang"
 
 g_slang: ^slang.IGlobalSession
 g_wayland: gwin.WaylandContext
-g_renderer: GlowRenderer
+g_renderer: Glow
 g_epoll: EPollController
 g_server: GlowServer
 
@@ -42,7 +42,7 @@ main :: proc() {
 	if g_options.max_windows == 0 {
 		g_options.max_windows = 8
 	}
-
+	g_options.debug = true
 	log_level := g_options.debug ? log.Level.Debug : log.Level.Info
 	context.logger = log.create_console_logger(log_level, {.Level, .Procedure})
 
@@ -88,15 +88,9 @@ main :: proc() {
 	shutdown()
 }
 
-broadcast_window_destroyed :: proc(window_id: u32) {
+broadcast_shader_removed :: proc(shader: string) {
 	msg: Message
-	msg_window_destroyed(&msg, window_id)
-	server_broadcast(&g_server, &msg)
-}
-
-broadcast_window_visible :: proc(window_id: u32, visible: bool) {
-	msg: Message
-	msg_window_visible(&msg, window_id, visible)
+	msg_shader_removed(&msg, shader)
 	server_broadcast(&g_server, &msg)
 }
 
@@ -113,20 +107,15 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 		}
 		switch key {
 		case KEY_Q:
+			broadcast_shader_removed(win.path)
 			glow_destroy_window(&g_renderer, win)
-			broadcast_window_destroyed()
 		case KEY_E:
 			set_window_fullscreen(win, !native.fullscreen)
 		case KEY_ESCAPE:
 			set_window_fullscreen(win, false)
-		case KEY_H:
-			set_window_visible(win, false)
 		case KEY_P:
 			active := !sync.atomic_load(&win.active)
 			set_window_active(win, active)
-			if active {
-				renderer_wakeup(&g_renderer)
-			}
 		case:
 			on_window_input(win, key, true)
 		}
@@ -170,6 +159,7 @@ command_handler :: proc(cmd_union: GlowCommand) {
 	case CmdRemoveShader:
 		win := g_renderer.windows[cmd.path]
 		if win != nil {
+			broadcast_shader_removed(win.path)
 			glow_destroy_window(&g_renderer, win)
 		}
 	case CmdCompileShader:

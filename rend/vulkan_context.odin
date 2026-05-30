@@ -3,6 +3,7 @@ package rend
 import "base:runtime"
 import "core:dynlib"
 import "core:log"
+import "core:sync"
 import vk "vendor:vulkan"
 
 DEVICE_EXTENSIONS :: []cstring {
@@ -34,6 +35,7 @@ VulkanContext :: struct {
 	graphics_queue:     vk.Queue,
 	present_queue_idx:  u32,
 	present_queue:      vk.Queue,
+	queue_mtx:          sync.Mutex,
 }
 
 vk_try :: proc(result: vk.Result, location := #caller_location) {

@@ -3,6 +3,8 @@ package glow
 import "core:log"
 import "core:math"
 import "core:sync"
+import "core:thread"
+import "core:time"
 
 import "../gwin"
 import "../rend"
@@ -12,15 +14,19 @@ CAMERA_SPEED_MIN :: f32(0.25)
 CAMERA_SPEED_MAX :: f32(64.0)
 
 GlowWindow :: struct {
-	glow:             ^GlowRenderer,
+	glow:             ^Glow,
 	path:             string,
 	native:           ^gwin.WaylandWindow,
 	ren:              rend.Renderer,
 	pbuf:             ProgramBuffer,
 	index:            uint,
+	render_thread:    ^thread.Thread,
+	render_signal:    sync.Auto_Reset_Event,
+	running:          bool,
 	visible:          bool,
 	active:           bool,
 	frame_index:      int,
+	timer:            time.Stopwatch,
 	mouse_x:          f32,
 	mouse_y:          f32,
 	input:            [4]u32,
@@ -33,7 +39,7 @@ GlowWindow :: struct {
 	last_update_time: f32,
 }
 
-create_window :: proc(glow: ^GlowRenderer, path: string, win: ^GlowWindow) {
+create_window :: proc(glow: ^Glow, path: string, win: ^GlowWindow) {
 	win.glow = glow
 	win.path = path
 	index, index_success := alloc_index(&glow.window_indexes)
@@ -62,13 +68,26 @@ create_window :: proc(glow: ^GlowRenderer, path: string, win: ^GlowWindow) {
 		log.panic("Failed to create Vulkan surface")
 	}
 	glow_ensure_context(glow, surface)
-	win.ren = rend.create_renderer(glow.vkc, &glow.res, surface, g_options.width, g_options.height)
+	win.ren = rend.create_renderer(
+		&glow.vkc,
+		&glow.res,
+		surface,
+		g_options.width,
+		g_options.height,
+	)
 	win.visible = true
 	win.active = true
 	win.camera_speed = 4.0
+	win.running = true
+	time.stopwatch_start(&win.timer)
+	win.render_thread = thread.create_and_start_with_data(win, window_renderer, context)
 }
 
 destroy_window :: proc(win: ^GlowWindow) {
+	sync.atomic_store(&win.running, false)
+	sync.auto_reset_event_signal(&win.render_signal)
+	thread.destroy(win.render_thread)
+
 	rend.wait_renderer(&win.ren)
 	rend.destroy_renderer(&win.ren)
 	free_index(&win.glow.window_indexes, win.index)
@@ -96,16 +115,64 @@ create_vulkan_surface :: proc(
 	return vk_surface, true
 }
 
+wakeup_window :: proc(win: ^GlowWindow) {
+	sync.auto_reset_event_signal(&win.render_signal)
+}
+
+render_window :: proc(win: ^GlowWindow) {
+	pbuf_render_done(&win.pbuf)
+	prog := &win.pbuf.prog
+	if !prog.allocated {
+		log.panic("Attempted to render with unallocated program")
+	}
+	width := f32(win.native.width) * win.native.scale
+	height := f32(win.native.height) * win.native.scale
+	current_time := f32(time.duration_seconds(time.stopwatch_duration(win.timer)))
+	tick_window_input(win, current_time)
+
+	constants := get_window_constants(win, current_time)
+	render_info := rend.RenderInfo {
+		dst_width  = u32(width),
+		dst_height = u32(height),
+		constants  = constants,
+	}
+	if rend.render(&win.ren, &render_info, prog) {
+		win.frame_index += 1
+	}
+}
+
+should_render :: proc(win: ^GlowWindow) -> bool {
+	return(
+		sync.atomic_load(&win.visible) &&
+		sync.atomic_load(&win.active) &&
+		sync.atomic_load(&win.pbuf.ready) \
+	)
+}
+
+window_renderer :: proc(raw: rawptr) {
+	win := cast(^GlowWindow)raw
+	for sync.atomic_load(&win.running) {
+		if should_render(win) {
+			render_window(win)
+		} else {
+			sync.auto_reset_event_wait(&win.render_signal)
+		}
+	}
+}
+
 set_window_visible :: proc(win: ^GlowWindow, visible: bool) {
 	gwin.set_window_visible(win.native, visible)
 	sync.atomic_store(&win.visible, visible)
 	if visible {
-		renderer_wakeup(win.glow)
+		wakeup_window(win)
 	}
 }
 
 set_window_active :: proc(win: ^GlowWindow, active: bool) {
 	sync.atomic_store(&win.active, active)
+	if active {
+		wakeup_window(win)
+	}
 }
 
 set_window_fullscreen :: proc(win: ^GlowWindow, fullscreen: bool) {

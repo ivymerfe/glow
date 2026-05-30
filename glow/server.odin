@@ -173,22 +173,23 @@ client_read_commands :: proc(srv: ^GlowServer, fd: linux.Fd) {
 	consume := 0
 	for {
 		available := client.rbuf_len - consume
-		if available < HEADER_SIZE {
+		if available < 4 {
 			break
 		}
-		typ := GlowCommandType(client.rbuf[consume])
-		payload_size := int(parse_u32_le(client.rbuf[consume + 1:consume + 5]))
+		payload_size := int(read_u32(client.rbuf[consume:consume + 4]))
 		ensure(
-			payload_size >= 0 && payload_size <= MAX_FRAME_SIZE,
+			payload_size >= 0 && payload_size <= COMMAND_MAX_SIZE,
 			"Invalid payload size from client",
 		)
-		total := HEADER_SIZE + payload_size
+		total := 4 + payload_size
 		if available < total {
 			break
 		}
-		payload := client.rbuf[consume + HEADER_SIZE:consume + total]
-		cmd := decode_command(typ, payload)
-		srv.on_cmd(cmd)
+		payload := client.rbuf[consume + 4:consume + total]
+		cmd, success := decode_command(payload)
+		if success {
+			srv.on_cmd(cmd)
+		}
 		consume += total
 	}
 	if consume > 0 {

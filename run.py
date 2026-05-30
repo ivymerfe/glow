@@ -8,33 +8,27 @@ import threading
 
 SOCKET_PATH = "/tmp/glow.sock"
 
-WINDOW_CREATE     = 0
-WINDOW_DESTROY    = 1
-WINDOW_VISIBLE    = 2
-WINDOW_FULLSCREEN = 3
-WINDOW_PROGRAM    = 4
+SHADER_SOURCE     = 0
+TOGGLE_FULLSCREEN    = 1
+REMOVE_SHADER    = 2
+COMPILE_SHADER = 3
 
 def u8(x: int) -> bytes:   return struct.pack("<B", x)
 def u32(x: int) -> bytes:  return struct.pack("<I", x)
 def lstr(s: str) -> bytes: b = s.encode(); return u32(len(b)) + b
 
 def frame(cmd_type: int, payload: bytes) -> bytes:
-    return struct.pack("<BI", cmd_type, len(payload)) + payload
+    # command type is a part of payload
+    return struct.pack("<IB",  len(payload) + 1, cmd_type) + payload
 
-def encode_create(wid: int) -> bytes:
-    return frame(WINDOW_CREATE, u32(wid))
+def encode_source( path: str, source: str) -> bytes:
+    return frame(SHADER_SOURCE, lstr(path) + lstr(source))
 
-def encode_destroy(wid: int) -> bytes:
-    return frame(WINDOW_DESTROY, u32(wid))
+def encode_fullscreen(path: str) -> bytes:
+    return frame(TOGGLE_FULLSCREEN, lstr(path))
 
-def encode_visible(wid: int, v: bool) -> bytes:
-    return frame(WINDOW_VISIBLE, u32(wid) + u8(v))
-
-def encode_fullscreen(wid: int) -> bytes:
-    return frame(WINDOW_FULLSCREEN, u32(wid))
-
-def encode_program(wid: int, path: str, source: str) -> bytes:
-    return frame(WINDOW_PROGRAM, u32(wid) + lstr(path) + lstr(source))
+def encode_remove(path: str) -> bytes:
+    return frame(REMOVE_SHADER, lstr(path))
 
 def recv_loop(sock: socket.socket) -> None:
     """Print messages from the server (u32 size + payload)."""
@@ -58,12 +52,10 @@ def recv_loop(sock: socket.socket) -> None:
 
 HELP = """\
 Commands:
-  create <wid>
-  destroy <wid>
-  visible <wid> <0|1>
-  fullscreen <wid>
-  program <wid> <path>          (reads file from disk)
-  quit
+  s <path>
+  f <path>
+  r  <path>
+  q
 """
 
 def repl(sock: socket.socket) -> None:
@@ -71,9 +63,8 @@ def repl(sock: socket.socket) -> None:
         sock.sendall(data)
 
     print(HELP)
-    send(encode_create(0))
     path = "tests/test_camera.slang"
-    send(encode_program(0, path, open(path).read())) 
+    send(encode_source( path, open(path).read())) 
     for raw in sys.stdin:
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -82,19 +73,15 @@ def repl(sock: socket.socket) -> None:
             parts = shlex.split(line)
             cmd = parts[0].lower()
 
-            if cmd == "quit":
+            if cmd == "q":
                 break
-            elif cmd == "create":
-                send(encode_create(int(parts[1], 0)))
-            elif cmd == "destroy":
-                send(encode_destroy(int(parts[1], 0)))
-            elif cmd == "visible":
-                send(encode_visible(int(parts[1], 0), bool(int(parts[2]))))
-            elif cmd == "fullscreen":
-                send(encode_fullscreen(int(parts[1], 0)))
-            elif cmd == "program":
-                wid, path = int(parts[1], 0), parts[2]
-                send(encode_program(wid, path, open(path).read()))
+            elif cmd == "s":
+                path = parts[1]
+                send(encode_source(path, open(path).read()))
+            elif cmd == "f":
+                send(encode_fullscreen(parts[1]))
+            elif cmd == "r":
+                send(encode_remove(parts[1]))
             else:
                 print(f"unknown command: {cmd}")
         except (IndexError, ValueError) as e:

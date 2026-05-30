@@ -7,11 +7,11 @@ const static float EPSILON = 1e-3;
 
 const static int ITER_GEOMETRY = 3;
 const static int ITER_FRAGMENT = 5;
-const static float SEA_HEIGHT = 1.0;
-const static float SEA_CHOPPY = 1.5;
+const static float SEA_HEIGHT = 0.6;
+const static float SEA_CHOPPY = 4.0;
 const static float SEA_SPEED = 1.2;
 const static float SEA_FREQ = 0.16;
-const static float3 SEA_BASE = float3(0.0, 0.1, 0.2);
+const static float3 SEA_BASE = float3(0.0, 0.09, 0.18);
 const static float3 SEA_WATER_COLOR = float3(0.1, 0.9, 0.6) * 0.6;
 const static float2x2 octave_m = float2x2(1.6, 1.2, -1.2, 1.6);
 
@@ -165,7 +165,6 @@ float heightMapTracing(float3 ori, float3 dir, out float3 p, float time)
 
 [shader("pixel")]
 [glowCamera]
-[glowTarget(1920/2,1080/2)]
 float4 pass(VertexOutput in) : SV_Target0
 {
     float2 uv = in.uv * 2.0 - 1.0;

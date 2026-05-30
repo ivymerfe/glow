@@ -1,6 +1,8 @@
 package rend
 
 import "core:log"
+import "core:sync"
+import "core:time"
 import vk "vendor:vulkan"
 
 Swapchain :: struct {
@@ -12,7 +14,7 @@ Swapchain :: struct {
 }
 
 Renderer :: struct {
-	using vk_context:           VulkanContext,
+	using vk_context:           ^VulkanContext,
 	surface:                    vk.SurfaceKHR,
 	surface_format:             vk.SurfaceFormatKHR,
 	present_mode:               vk.PresentModeKHR,
@@ -52,7 +54,7 @@ RenderInfo :: struct {
 }
 
 create_renderer :: proc(
-	vkc: VulkanContext,
+	vkc: ^VulkanContext,
 	res: ^ResourceManager,
 	surface: vk.SurfaceKHR,
 	swapchain_width: uint,
@@ -123,26 +125,24 @@ wait_renderer :: proc(ren: ^Renderer) {
 }
 
 resize_swapchain :: proc(ren: ^Renderer, new_width: uint, new_height: uint) {
-	wait_renderer(ren)
+	if ren.swapchain_width == new_width && ren.swapchain_height == new_height {
+		return
+	}
 	ren.swapchain_width = new_width
 	ren.swapchain_height = new_height
 	recreate_swapchain(ren)
 }
 
-is_renderer_ready :: proc(ren: ^Renderer) -> bool {
-	fence_status := vk.GetFenceStatus(ren.device, ren.render_fence)
-	return fence_status == .SUCCESS
-}
-
 render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> bool {
-	swapchain := ren.swapchain
+	vk.WaitForFences(ren.device, 1, &ren.render_fence, true, max(u64))
 
+	swapchain := ren.swapchain
 	sem_image_available := ren.image_available_semaphore
 	image_index: u32
 	acquire_result := vk.AcquireNextImageKHR(
 		ren.device,
 		swapchain.h,
-		max(u64), // less cpu
+		60,
 		sem_image_available,
 		{},
 		&image_index,
@@ -169,7 +169,7 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> b
 
 	scissor := vk.Rect2D {
 		offset = vk.Offset2D{x = 0, y = 0},
-		extent = vk.Extent2D{width = u32(ren.swapchain_width), height = u32(ren.swapchain_height)},
+		extent = vk.Extent2D{width = u32(10000), height = u32(10000)},
 	}
 	vk.CmdSetScissor(cmd, 0, 1, &scissor)
 
@@ -256,6 +256,8 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> b
 		pSignalSemaphores    = &sem_render_finished,
 	}
 	vk_try(vk.ResetFences(ren.device, 1, &ren.render_fence))
+
+	sync.lock(&ren.queue_mtx)
 	vk_try(vk.QueueSubmit(ren.graphics_queue, 1, &submit_info, ren.render_fence))
 
 	present_info := vk.PresentInfoKHR {
@@ -267,6 +269,8 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> b
 		pImageIndices      = &image_index,
 	}
 	present_result := vk.QueuePresentKHR(ren.present_queue, &present_info)
+	sync.unlock(&ren.queue_mtx)
+
 	switch {
 	case present_result == .ERROR_OUT_OF_DATE_KHR || present_result == .SUBOPTIMAL_KHR:
 		recreate_swapchain(ren)
@@ -279,6 +283,7 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> b
 
 recreate_swapchain :: proc(ren: ^Renderer) {
 	new_swapchain: Swapchain
+	wait_renderer(ren)
 	create_swapchain(ren, &new_swapchain, &ren.swapchain)
 	destroy_swapchain(ren, &ren.swapchain)
 	ren.swapchain = new_swapchain
