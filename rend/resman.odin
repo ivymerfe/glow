@@ -5,6 +5,7 @@ import vk "vendor:vulkan"
 
 TARGET_FORMAT: vk.Format = .R32G32B32A32_SFLOAT
 VS_FULLSCREEN_SPV: []u8 = #load("shaders/vs_fullscreen.spv")
+// TEST_SPV: []u8 = #load("shaders/test.spv")
 
 GlowImage :: struct {
 	extent:            vk.Extent2D,

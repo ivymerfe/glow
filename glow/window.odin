@@ -3,6 +3,7 @@ package glow
 import "core:log"
 import "core:math"
 import "core:sync"
+import "core:sys/linux"
 import "core:thread"
 import "core:time"
 
@@ -23,6 +24,7 @@ GlowWindow :: struct {
 	index:            uint,
 	render_thread:    ^thread.Thread,
 	render_signal:    sync.Auto_Reset_Event,
+	timer_fd:         linux.Fd,
 	running:          bool,
 	visible:          bool,
 	active:           bool,
@@ -64,7 +66,14 @@ create_window :: proc(glow: ^Glow, path: string, win: ^GlowWindow) {
 	}
 	win.native = native
 
-	surface, ok := create_vulkan_surface(native, glow.instance)
+	win.render_thread = thread.create_and_start_with_data(win, window_renderer, context)
+}
+
+window_renderer :: proc(raw: rawptr) {
+	win := cast(^GlowWindow)raw
+	glow := win.glow
+	sync.auto_reset_event_wait(&win.native.configure_event)
+	surface, ok := create_vulkan_surface(win.native, glow.instance)
 	if !ok {
 		log.panic("Failed to create Vulkan surface")
 	}
@@ -81,15 +90,77 @@ create_window :: proc(glow: ^Glow, path: string, win: ^GlowWindow) {
 	win.camera_speed = 4.0
 	win.running = true
 	time.stopwatch_start(&win.timer)
-	win.render_thread = thread.create_and_start_with_data(win, window_renderer, context)
+	err: linux.Errno
+	win.timer_fd, err = linux.timerfd_create(.MONOTONIC, {})
+	if err != .NONE {
+		log.panicf("Failed to create timer: %v", err)
+	}
+	ns_per_frame: uint = 1000_000_000 / g_options.target_fps
+	spec := linux.ITimer_Spec {
+		value = linux.Time_Spec{time_sec = 0, time_nsec = ns_per_frame},
+		interval = linux.Time_Spec{time_sec = 0, time_nsec = ns_per_frame},
+	}
+	err = linux.timerfd_settime(win.timer_fd, {}, &spec, {})
+	if err != .NONE {
+		log.panicf("Failed timerfd_settime: %v", err)
+	}
+	for sync.atomic_load(&win.running) {
+		if should_render(win) {
+			frame_start := time.tick_now()
+			render_window(win)
+			expirations: u64
+			n := linux.syscall(linux.SYS_read, win.timer_fd, &expirations, 8)
+			if n < 8 {
+				break
+			}
+		} else {
+			sync.auto_reset_event_wait(&win.render_signal)
+		}
+	}
+}
+
+wakeup_window :: proc(win: ^GlowWindow) {
+	sync.auto_reset_event_signal(&win.render_signal)
+}
+
+should_render :: proc(win: ^GlowWindow) -> bool {
+	return(
+		sync.atomic_load(&win.visible) &&
+		sync.atomic_load(&win.active) &&
+		sync.atomic_load(&win.pbuf.ready) \
+	)
+}
+
+render_window :: proc(win: ^GlowWindow) {
+	rend.wait_renderer(&win.ren)
+
+	pbuf_render_done(&win.pbuf)
+	prog := &win.pbuf.prog
+	if !prog.allocated {
+		log.panic("Attempted to render with unallocated program")
+	}
+	width := f32(win.native.width) * win.native.scale
+	height := f32(win.native.height) * win.native.scale
+	current_time := f32(time.duration_seconds(time.stopwatch_duration(win.timer)))
+	tick_window_input(win, current_time)
+
+	constants := get_window_constants(win, current_time)
+	render_info := rend.RenderInfo {
+		dst_width  = u32(width),
+		dst_height = u32(height),
+		constants  = constants,
+	}
+	if rend.render(&win.ren, &render_info, prog) {
+		win.frame_index += 1
+	}
 }
 
 destroy_window :: proc(win: ^GlowWindow) {
 	sync.atomic_store(&win.running, false)
 	sync.auto_reset_event_signal(&win.render_signal)
+	linux.close(win.timer_fd)
 	thread.destroy(win.render_thread)
 
-	rend.wait_renderer(&win.ren)
 	rend.destroy_renderer(&win.ren)
 	free_index(&win.glow.window_indexes, win.index)
 	gwin.destroy_window(win.native)
@@ -114,70 +185,6 @@ create_vulkan_surface :: proc(
 		return {}, false
 	}
 	return vk_surface, true
-}
-
-request_next_frame :: proc "c" (win: ^GlowWindow) {
-	callback := wl.surface_frame(win.native.surface)
-	wl.callback_add_listener(callback, &frame_listener, win)
-	wl.surface_commit(win.native.surface)
-}
-
-on_frame_done :: proc "c" (data: rawptr, callback: ^wl.callback, time: uint) {
-	wl.callback_destroy(callback)
-	win := cast(^GlowWindow)data
-	sync.auto_reset_event_signal(&win.render_signal)
-}
-
-frame_listener := wl.callback_listener {
-	done = on_frame_done,
-}
-
-wakeup_window :: proc(win: ^GlowWindow) {
-	sync.auto_reset_event_signal(&win.render_signal)
-}
-
-render_window :: proc(win: ^GlowWindow) {
-	pbuf_render_done(&win.pbuf)
-	prog := &win.pbuf.prog
-	if !prog.allocated {
-		log.panic("Attempted to render with unallocated program")
-	}
-	width := f32(win.native.width) * win.native.scale
-	height := f32(win.native.height) * win.native.scale
-	current_time := f32(time.duration_seconds(time.stopwatch_duration(win.timer)))
-	tick_window_input(win, current_time)
-
-	constants := get_window_constants(win, current_time)
-	render_info := rend.RenderInfo {
-		dst_width  = u32(width),
-		dst_height = u32(height),
-		constants  = constants,
-	}
-	if rend.render(&win.ren, &render_info, prog) {
-		win.frame_index += 1
-	}
-}
-
-should_render :: proc(win: ^GlowWindow) -> bool {
-	return(
-		sync.atomic_load(&win.visible) &&
-		sync.atomic_load(&win.active) &&
-		sync.atomic_load(&win.pbuf.ready) \
-	)
-}
-
-window_renderer :: proc(raw: rawptr) {
-	win := cast(^GlowWindow)raw
-	request_next_frame(win)
-
-	for sync.atomic_load(&win.running) {
-		sync.auto_reset_event_wait(&win.render_signal)
-
-		if should_render(win) {
-			render_window(win)
-			request_next_frame(win)
-		}
-	}
 }
 
 set_window_visible :: proc(win: ^GlowWindow, visible: bool) {

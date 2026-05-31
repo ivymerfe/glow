@@ -9,6 +9,7 @@ import "core:sys/linux"
 import "core:time"
 
 import "../gwin"
+import "../gwin/wl"
 import "../rend"
 import "../slang"
 
@@ -21,6 +22,7 @@ g_server: GlowServer
 Options :: struct {
 	width:       uint `usage:"Buffer width"`,
 	height:      uint `usage:"Buffer height"`,
+	target_fps:  uint `usage:"Target FPS"`,
 	max_images:  uint `usage:"Max images per window"`,
 	max_windows: uint `usage:"Max window count"`,
 	debug:       bool `usage:"Show debug messages, enable validation layers"`,
@@ -28,6 +30,7 @@ Options :: struct {
 
 g_options: Options
 
+g_wayland_read_prepared := false
 main :: proc() {
 	flags.parse_or_exit(&g_options, os.args, .Odin)
 	if g_options.width == 0 {
@@ -35,6 +38,9 @@ main :: proc() {
 	}
 	if g_options.height == 0 {
 		g_options.height = 1080
+	}
+	if g_options.target_fps == 0 {
+		g_options.target_fps = 60
 	}
 	if g_options.max_images == 0 {
 		g_options.max_images = 32
@@ -69,23 +75,30 @@ main :: proc() {
 	server_init(&g_server, &g_epoll, command_handler)
 
 	wayland_fd := gwin.get_display_fd(&g_wayland)
-	epoll_add(
-		&g_epoll,
-		linux.Fd(wayland_fd),
-		{.IN},
-		proc(fd: linux.Fd, ev: linux.EPoll_Event_Set, data: rawptr) {
-			if ev & {.IN} != {} {
-				gwin.dispatch_events(&g_wayland)
-			}
-		},
-		&g_wayland,
-	)
+	epoll_add(&g_epoll, linux.Fd(wayland_fd), {.IN}, wayland_handler, &g_wayland)
 	for {
+		wl.display_flush(g_wayland.display)
+		for wl.display_prepare_read(g_wayland.display) != 0 {
+			wl.display_dispatch_pending(g_wayland.display)
+		}
+		g_wayland_read_prepared = true
 		if !epoll_poll(&g_epoll) {
 			log.panic("poll failed")
 		}
+		if g_wayland_read_prepared {
+			wl.display_cancel_read(g_wayland.display)
+		}
 	}
 	shutdown()
+}
+
+wayland_handler :: proc(fd: linux.Fd, ev: linux.EPoll_Event_Set, data: rawptr) {
+	wl_data := cast(^gwin.WaylandContext)data
+	if ev & {.IN} != {} {
+		g_wayland_read_prepared = false
+		wl.display_read_events(wl_data.display)
+		wl.display_dispatch_pending(wl_data.display)
+	}
 }
 
 broadcast_shader_removed :: proc(shader: string) {

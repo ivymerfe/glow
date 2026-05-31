@@ -105,6 +105,9 @@ create_renderer :: proc(
 }
 
 destroy_renderer :: proc(ren: ^Renderer) {
+	wait_renderer(ren)
+	vk.QueueWaitIdle(ren.present_queue)
+
 	destroy_swapchain(ren, &ren.swapchain)
 
 	vk.DestroySurfaceKHR(ren.instance, ren.surface, nil)
@@ -121,7 +124,6 @@ destroy_renderer :: proc(ren: ^Renderer) {
 
 wait_renderer :: proc(ren: ^Renderer) {
 	vk_try(vk.WaitForFences(ren.device, 1, &ren.render_fence, true, max(u64)))
-	vk_try(vk.QueueWaitIdle(ren.present_queue))
 }
 
 resize_swapchain :: proc(ren: ^Renderer, new_width: uint, new_height: uint) {
@@ -284,6 +286,7 @@ render :: proc(ren: ^Renderer, render_info: ^RenderInfo, program: ^Program) -> b
 recreate_swapchain :: proc(ren: ^Renderer) {
 	new_swapchain: Swapchain
 	wait_renderer(ren)
+	vk.QueueWaitIdle(ren.present_queue)
 	create_swapchain(ren, &new_swapchain, &ren.swapchain)
 	destroy_swapchain(ren, &ren.swapchain)
 	ren.swapchain = new_swapchain
@@ -436,11 +439,11 @@ choose_swapchain_surface_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.Su
 
 @(private = "file")
 choose_swapchain_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
-	// for mode in modes {
-	// 	if mode == .MAILBOX {
-	// 		return .MAILBOX
-	// 	}
-	// }
+	for mode in modes {
+		if mode == .MAILBOX {
+			return .MAILBOX
+		}
+	}
 	return .FIFO
 }
 

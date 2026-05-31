@@ -136,6 +136,8 @@ compile_program :: proc(
 
 	create_info := vk.ShaderModuleCreateInfo {
 		sType    = .SHADER_MODULE_CREATE_INFO,
+		// codeSize = len(TEST_SPV),
+		// pCode    = auto_cast raw_data(TEST_SPV),
 		codeSize = int(target_code->getBufferSize()),
 		pCode    = auto_cast target_code->getBufferPointer(),
 	}

@@ -3,33 +3,42 @@ import base;
 
 const static int NUM_STEPS = 32;
 const static float PI = 3.141592;
-const static float EPSILON = 1e-3;
+const static float EPSILON = 1e-5;
 
 const static int ITER_GEOMETRY = 3;
 const static int ITER_FRAGMENT = 5;
-const static float SEA_HEIGHT = 0.6;
+const static float SEA_HEIGHT = 0.4;
 const static float SEA_CHOPPY = 4.0;
 const static float SEA_SPEED = 1.2;
-const static float SEA_FREQ = 0.16;
+const static float SEA_FREQ = 0.2;
 const static float3 SEA_BASE = float3(0.0, 0.09, 0.18);
 const static float3 SEA_WATER_COLOR = float3(0.1, 0.9, 0.6) * 0.6;
 const static float2x2 octave_m = float2x2(1.6, 1.2, -1.2, 1.6);
 
-float hash(float2 p)
-{
-    float h = dot(p, float2(127.1, 311.7));
-    return frac(sin(h) * 43758.5453123);
+float hash( float2 p ) {
+	 float h = dot(p,float2(127.1,311.7));	
+    return fract(sin(h)*43758.5453123);
 }
 
-float noise(float2 p)
-{
-    float2 i = floor(p);
-    float2 f = frac(p);
-    float2 u = f * f * (3.0 - 2.0 * f);
-    return -1.0 + 2.0 * lerp(
-                            lerp(hash(i + float2(0, 0)), hash(i + float2(1, 0)), u.x),
-                            lerp(hash(i + float2(0, 1)), hash(i + float2(1, 1)), u.x),
-                            u.y);
+// float hash(float2 p)
+// {
+//     // split dot product into high and low parts
+//     float2 p_hi = floor(p);
+//     float2 p_lo = p - p_hi;
+//     float h_hi = dot(p_hi, float2(127.1, 311.7));
+//     float h_lo = dot(p_lo, float2(127.1, 311.7));
+//     return frac(sin(h_hi + h_lo) * 43758.5453123);
+// }
+
+float noise( in float2 p ) {
+    float2 i = floor( p );
+    float2 f = fract( p );	
+	float2 u = f*f*(3.0-2.0*f);
+    float a = hash(i + float2(0, 0));
+    float b = hash(i + float2(1, 0));
+    float c = hash(i + float2(0, 1));
+    float d = hash(i + float2(1, 1));
+    return -1.0 + 2.0 * lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y); 
 }
 
 float sea_octave(float2 uv, float choppy)
@@ -37,7 +46,7 @@ float sea_octave(float2 uv, float choppy)
     uv += noise(uv);
     float2 wv = 1.0 - abs(sin(uv));
     float2 swv = abs(cos(uv));
-    wv = lerp(wv, swv, wv);
+    wv = lerp(wv, swv, saturate(wv));
     return pow(1.0 - pow(wv.x * wv.y, 0.65), choppy);
 }
 
@@ -55,7 +64,7 @@ float map(float3 p, float time)
         d = sea_octave((uv + time) * freq, choppy);
         d += sea_octave((uv - time) * freq, choppy);
         h += d * amp;
-        uv = mul(octave_m, uv);
+        uv = mul(uv, octave_m);
         freq *= 1.9;
         amp *= 0.22;
         choppy = lerp(choppy, 1.0, 0.2);
@@ -78,7 +87,7 @@ float map_detailed(float3 p, float time)
         d = sea_octave((uv + time) * freq, choppy);
         d += sea_octave((uv - time) * freq, choppy);
         h += d * amp;
-        uv = mul(octave_m, uv);
+        uv = mul(uv, octave_m);
         freq *= 1.9;
         amp *= 0.22;
         choppy = lerp(choppy, 1.0, 0.2);
@@ -165,7 +174,7 @@ float heightMapTracing(float3 ori, float3 dir, out float3 p, float time)
 
 [shader("pixel")]
 [glowCamera]
-float4 pass(VertexOutput in) : SV_Target0
+float4 main(VertexOutput in) : SV_Target0
 {
     float2 uv = in.uv * 2.0 - 1.0;
     uv.y *= -1.0;
@@ -180,7 +189,7 @@ float4 pass(VertexOutput in) : SV_Target0
     float3 p;
     heightMapTracing(ori, dir, p, time);
     float3 dist = p - ori;
-    float3 n = getNormal(p, dot(dist, dist) * (0.1 / scene.resolution.x), time);
+    float3 n = getNormal(p, 0.01, time);
     float3 light = normalize(float3(0.0, 1.0, 0.8));
 
     float3 col = lerp(
@@ -190,3 +199,4 @@ float4 pass(VertexOutput in) : SV_Target0
 
     return float4(pow(col, 2.2), 1.0);
 }
+
