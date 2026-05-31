@@ -8,7 +8,6 @@ import "core:thread"
 import "core:time"
 
 import "../gwin"
-import "../gwin/wl"
 import "../rend"
 import vk "vendor:vulkan"
 
@@ -85,11 +84,6 @@ window_renderer :: proc(raw: rawptr) {
 		g_options.width,
 		g_options.height,
 	)
-	win.visible = true
-	win.active = true
-	win.camera_speed = 4.0
-	win.running = true
-	time.stopwatch_start(&win.timer)
 	err: linux.Errno
 	win.timer_fd, err = linux.timerfd_create(.MONOTONIC, {})
 	if err != .NONE {
@@ -104,6 +98,11 @@ window_renderer :: proc(raw: rawptr) {
 	if err != .NONE {
 		log.panicf("Failed timerfd_settime: %v", err)
 	}
+	win.visible = true
+	win.active = true
+	win.camera_speed = 4.0
+	win.running = true
+	time.stopwatch_start(&win.timer)
 	for sync.atomic_load(&win.running) {
 		if should_render(win) {
 			frame_start := time.tick_now()
