@@ -7,6 +7,7 @@ import "core:thread"
 import "core:time"
 
 import "../gwin"
+import "../gwin/wl"
 import "../rend"
 import vk "vendor:vulkan"
 
@@ -115,6 +116,22 @@ create_vulkan_surface :: proc(
 	return vk_surface, true
 }
 
+request_next_frame :: proc "c" (win: ^GlowWindow) {
+	callback := wl.surface_frame(win.native.surface)
+	wl.callback_add_listener(callback, &frame_listener, win)
+	wl.surface_commit(win.native.surface)
+}
+
+on_frame_done :: proc "c" (data: rawptr, callback: ^wl.callback, time: uint) {
+	wl.callback_destroy(callback)
+	win := cast(^GlowWindow)data
+	sync.auto_reset_event_signal(&win.render_signal)
+}
+
+frame_listener := wl.callback_listener {
+	done = on_frame_done,
+}
+
 wakeup_window :: proc(win: ^GlowWindow) {
 	sync.auto_reset_event_signal(&win.render_signal)
 }
@@ -151,11 +168,14 @@ should_render :: proc(win: ^GlowWindow) -> bool {
 
 window_renderer :: proc(raw: rawptr) {
 	win := cast(^GlowWindow)raw
+	request_next_frame(win)
+
 	for sync.atomic_load(&win.running) {
+		sync.auto_reset_event_wait(&win.render_signal)
+
 		if should_render(win) {
 			render_window(win)
-		} else {
-			sync.auto_reset_event_wait(&win.render_signal)
+			request_next_frame(win)
 		}
 	}
 }
