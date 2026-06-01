@@ -201,8 +201,11 @@ set_window_active :: proc(win: ^GlowWindow, active: bool) {
 	}
 }
 
-set_window_fullscreen :: proc(win: ^GlowWindow, fullscreen: bool) {
+set_window_fullscreen :: proc(win: ^GlowWindow, fullscreen: bool, activate: bool) {
 	gwin.set_window_fullscreen(win.native, fullscreen)
+	if fullscreen && activate {
+		gwin.request_window_activation(win.native)
+	}
 }
 
 update_key_state :: proc(win: ^GlowWindow, key: u32, pressed: bool) {
