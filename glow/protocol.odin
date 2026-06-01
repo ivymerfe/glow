@@ -1,7 +1,5 @@
 package glow
 
-import "core:log"
-
 CmdShaderSource :: struct {
 	path:   string,
 	source: string,
@@ -95,6 +93,10 @@ msg_shader_removed :: proc(msg: ^Message, shader: string) {
 	msg_finish(msg)
 }
 
+msg_get_buffer :: proc(msg: ^Message) -> []u8 {
+	return msg.buf[:msg.len + 4]
+}
+
 read_u32 :: proc(data: []u8) -> u32 {
 	ensure(len(data) >= 4, "Data too small to parse u32")
 	num := u32(data[0]) | (u32(data[1]) << 8) | (u32(data[2]) << 16) | (u32(data[3]) << 24)
@@ -114,14 +116,14 @@ read_string :: proc(data: []u8, cursor: ^int) -> string {
 	return s
 }
 
-@(private)
+@(private = "file")
 msg_u8 :: proc(b: ^Message, v: u8) {
 	ensure(b.len + 1 + 4 <= MESSAGE_MAX_SIZE, "Message overflow")
 	b.buf[b.len + 4] = v
 	b.len += 1
 }
 
-@(private)
+@(private = "file")
 msg_u32 :: proc(msg: ^Message, v: u32) {
 	ensure(msg.len + 4 + 4 <= MESSAGE_MAX_SIZE, "Message overflow")
 	off := msg.len + 4
@@ -132,7 +134,7 @@ msg_u32 :: proc(msg: ^Message, v: u32) {
 	msg.len += 4
 }
 
-@(private)
+@(private = "file")
 msg_string :: proc(msg: ^Message, s: string) {
 	bytes := transmute([]u8)s
 	ensure(msg.len + 4 + len(bytes) + 4 <= MESSAGE_MAX_SIZE, "Message overflow")
@@ -141,7 +143,7 @@ msg_string :: proc(msg: ^Message, s: string) {
 	msg.len += len(bytes)
 }
 
-@(private)
+@(private = "file")
 msg_finish :: proc(msg: ^Message) {
 	msg_len := u32(msg.len)
 	msg.buf[0] = u8(msg_len & 0xff)

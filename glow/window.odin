@@ -8,6 +8,7 @@ import "core:thread"
 import "core:time"
 
 import "../gwin"
+import "../gwin/wl"
 import "../rend"
 import vk "vendor:vulkan"
 
@@ -261,6 +262,13 @@ on_window_keyboard_leave :: proc(win: ^GlowWindow) {
 on_window_pointer_enter :: proc(win: ^GlowWindow, pointer: ^gwin.WaylandPointer, x: f32, y: f32) {
 	win.mouse_x = x / f32(win.native.width)
 	win.mouse_y = y / f32(win.native.height)
+	if pointer.cursor_shape_device != nil {
+		wl.cursor_shape_device_v1_set_shape(
+			pointer.cursor_shape_device,
+			pointer.serial,
+			u32(wl.cursor_shape_v1_shape.default),
+		)
+	}
 }
 
 on_window_pointer_motion :: proc(win: ^GlowWindow, x: f32, y: f32) {

@@ -65,12 +65,13 @@ server_destroy :: proc(srv: ^GlowServer) {
 
 server_send :: proc(srv: ^GlowServer, fd: linux.Fd, msg: ^Message) {
 	client := &srv.clients[fd]
-	needed := client.wbuf_len + len(msg.buf)
+	buf := msg_get_buffer(msg)
+	needed := client.wbuf_len + len(buf)
 	if len(client.wbuf) < needed {
 		resize(&client.wbuf, needed)
 	}
-	copy(client.wbuf[client.wbuf_len:], msg.buf[:])
-	client.wbuf_len += len(msg.buf)
+	copy(client.wbuf[client.wbuf_len:], buf)
+	client.wbuf_len += len(buf)
 	epoll_modify(srv.ec, fd, {.IN, .RDHUP, .OUT})
 }
 
@@ -80,7 +81,7 @@ server_broadcast :: proc(srv: ^GlowServer, msg: ^Message) {
 	}
 }
 
-@(private)
+@(private = "file")
 server_accept_handler :: proc(fd: linux.Fd, events: linux.EPoll_Event_Set, user_data: rawptr) {
 	srv := cast(^GlowServer)user_data
 	for {
@@ -104,7 +105,7 @@ server_accept_handler :: proc(fd: linux.Fd, events: linux.EPoll_Event_Set, user_
 	}
 }
 
-@(private)
+@(private = "file")
 client_io_handler :: proc(fd: linux.Fd, events: linux.EPoll_Event_Set, user_data: rawptr) {
 	srv := cast(^GlowServer)user_data
 
@@ -120,7 +121,7 @@ client_io_handler :: proc(fd: linux.Fd, events: linux.EPoll_Event_Set, user_data
 	}
 }
 
-@(private)
+@(private = "file")
 client_do_read :: proc(srv: ^GlowServer, fd: linux.Fd) -> (ok: bool) {
 	client := &srv.clients[fd]
 	for {
@@ -142,7 +143,7 @@ client_do_read :: proc(srv: ^GlowServer, fd: linux.Fd) -> (ok: bool) {
 	return true
 }
 
-@(private)
+@(private = "file")
 client_do_write :: proc(srv: ^GlowServer, fd: linux.Fd) {
 	client := &srv.clients[fd]
 	for client.wbuf_len > 0 {
@@ -167,7 +168,7 @@ client_do_write :: proc(srv: ^GlowServer, fd: linux.Fd) {
 	}
 }
 
-@(private)
+@(private = "file")
 client_read_commands :: proc(srv: ^GlowServer, fd: linux.Fd) {
 	client := &srv.clients[fd]
 	consume := 0
@@ -201,7 +202,7 @@ client_read_commands :: proc(srv: ^GlowServer, fd: linux.Fd) {
 	}
 }
 
-@(private)
+@(private = "file")
 client_close :: proc(srv: ^GlowServer, fd: linux.Fd) {
 	epoll_remove(srv.ec, fd)
 	if client, ok := &srv.clients[fd]; ok {
@@ -213,7 +214,7 @@ client_close :: proc(srv: ^GlowServer, fd: linux.Fd) {
 	log.infof("Client disconnected: fd=%d", fd)
 }
 
-@(private)
+@(private = "file")
 set_nonblocking :: proc(fd: linux.Fd) {
 	flags, err := linux.fcntl(fd, linux.F_GETFL)
 	ensure(err == .NONE, "fcntl F_GETFL failed")
