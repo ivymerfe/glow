@@ -122,11 +122,11 @@ event_handler :: proc(native: ^gwin.WaylandWindow, event_union: gwin.WindowEvent
 		case KEY_Q:
 			broadcast_shader_removed(win.path)
 			glow_destroy_window(&g_renderer, win)
-		case KEY_E:
+		case KEY_F:
 			set_window_fullscreen(win, !native.fullscreen)
 		case KEY_ESCAPE:
 			set_window_fullscreen(win, false)
-		case KEY_P:
+		case KEY_Z:
 			active := !sync.atomic_load(&win.active)
 			set_window_active(win, active)
 		case:
@@ -167,7 +167,7 @@ command_handler :: proc(cmd_union: GlowCommand) {
 	case CmdToggleFullscreen:
 		win := g_renderer.windows[cmd.path]
 		if win != nil {
-			gwin.set_window_fullscreen(win.native, !win.native.fullscreen)
+			set_window_fullscreen(win, !win.native.fullscreen)
 		}
 	case CmdRemoveShader:
 		win := g_renderer.windows[cmd.path]
