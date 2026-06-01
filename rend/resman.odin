@@ -16,31 +16,30 @@ GlowImage :: struct {
 	layout:            vk.ImageLayout,
 	src_stage:         vk.PipelineStageFlags2,
 	src_access:        vk.AccessFlags2,
-	pass_width:        uint,
-	pass_height:       uint,
+	pass_width:        u32,
+	pass_height:       u32,
 	allocated:         bool,
 	in_descriptor_set: bool,
 }
 
 ResourceManager :: struct {
-	using vk_context:  VulkanContext,
-	desc_count:        uint,
-	images:            []GlowImage,
-	image_width:       uint,
-	image_height:      uint,
-	vs_fullscreen:     vk.ShaderModule,
-	descriptor_pool:   vk.DescriptorPool,
-	desc_set_layout:   vk.DescriptorSetLayout,
-	desc_set:          vk.DescriptorSet,
-	pipeline_layout:   vk.PipelineLayout,
-	descriptors_dirty: bool,
+	using vk_context: VulkanContext,
+	desc_count:       uint,
+	images:           []GlowImage,
+	image_width:      u32,
+	image_height:     u32,
+	vs_fullscreen:    vk.ShaderModule,
+	descriptor_pool:  vk.DescriptorPool,
+	desc_set_layout:  vk.DescriptorSetLayout,
+	desc_set:         vk.DescriptorSet,
+	pipeline_layout:  vk.PipelineLayout,
 }
 
 create_resource_manager :: proc(
 	res: ^ResourceManager,
 	vkc: VulkanContext,
-	image_width: uint,
-	image_height: uint,
+	image_width: u32,
+	image_height: u32,
 	desc_count: uint,
 ) {
 	res.vk_context = vkc
@@ -69,7 +68,6 @@ create_resource_manager :: proc(
 	create_descriptor_set(res)
 	create_pipeline_layout(res)
 	res.images = make([]GlowImage, desc_count)
-	res.descriptors_dirty = false
 }
 
 destroy_resource_manager :: proc(res: ^ResourceManager) {
@@ -89,16 +87,12 @@ destroy_resource_manager :: proc(res: ^ResourceManager) {
 }
 
 request_images :: proc(res: ^ResourceManager, base: uint, count: uint) {
-	created_any := false
 	for i in 0 ..< count {
 		if !res.images[base + i].allocated {
 			create_image(&res.vk_context, res.image_width, res.image_height, &res.images[base + i])
-			created_any = true
 		}
 	}
-	if created_any {
-		res.descriptors_dirty = true
-	}
+	write_descriptors(res, base, count)
 }
 
 free_images :: proc(res: ^ResourceManager, base: int, count: int) {
@@ -143,11 +137,11 @@ transition_image :: proc(
 	image.src_access = new_access
 }
 
-create_image :: proc(vk_context: ^VulkanContext, width: uint, height: uint, image: ^GlowImage) {
+create_image :: proc(vk_context: ^VulkanContext, width: u32, height: u32, image: ^GlowImage) {
 	image.format = TARGET_FORMAT
 	image.extent = vk.Extent2D {
-		width  = u32(width),
-		height = u32(height),
+		width  = width,
+		height = height,
 	}
 	img, mem := create_image_2d(
 		vk_context,
@@ -183,28 +177,16 @@ destroy_image :: proc(ctx: ^VulkanContext, image: ^GlowImage) {
 	image.allocated = false
 }
 
-prepare_resources :: proc(res: ^ResourceManager) {
-	if !res.descriptors_dirty {
-		return
-	}
-	pending: u32 = 0
-	for &img, i in res.images {
-		if img.allocated && !img.in_descriptor_set {
-			pending += 1
-		}
-	}
-	if pending == 0 {
-		res.descriptors_dirty = false
-		return
-	}
-	infos := make([]vk.DescriptorImageInfo, pending, context.temp_allocator)
-	writes := make([]vk.WriteDescriptorSet, pending, context.temp_allocator)
+@(private = "file")
+write_descriptors :: proc(res: ^ResourceManager, base: uint, count: uint) {
+	infos := make([]vk.DescriptorImageInfo, count, context.temp_allocator)
+	writes := make([]vk.WriteDescriptorSet, count, context.temp_allocator)
 	idx: u32 = 0
-	for &img, i in res.images {
+	for i in base ..< base + count {
+		img := &res.images[i]
 		if !img.allocated || img.in_descriptor_set {
 			continue
 		}
-
 		infos[idx] = vk.DescriptorImageInfo {
 			imageView   = img.view,
 			imageLayout = .GENERAL,
@@ -218,13 +200,12 @@ prepare_resources :: proc(res: ^ResourceManager) {
 			descriptorType  = .STORAGE_IMAGE,
 			pImageInfo      = &infos[idx],
 		}
-
 		img.in_descriptor_set = true
 		idx += 1
 	}
-
-	vk.UpdateDescriptorSets(res.device, idx, &writes[0], 0, nil)
-	res.descriptors_dirty = false
+	if idx > 0 {
+		vk.UpdateDescriptorSets(res.device, idx, &writes[0], 0, nil)
+	}
 }
 
 @(private = "file")

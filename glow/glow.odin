@@ -51,8 +51,8 @@ glow_ensure_context :: proc(r: ^Glow, surface: vk.SurfaceKHR) {
 		rend.create_resource_manager(
 			&r.res,
 			r.vkc,
-			g_options.width,
-			g_options.height,
+			u32(g_options.width),
+			u32(g_options.height),
 			g_options.max_images * g_options.max_windows,
 		)
 	}

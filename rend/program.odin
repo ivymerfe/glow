@@ -10,8 +10,8 @@ import vk "vendor:vulkan"
 ProgramPass :: struct {
 	entry_name:    cstring,
 	pipeline:      vk.Pipeline,
-	target_width:  uint,
-	target_height: uint,
+	target_width:  u32,
+	target_height: u32,
 }
 
 CameraInfo :: struct {
@@ -167,11 +167,11 @@ read_pass_attributes :: proc(prog: ^Program, pass: ^ProgramPass, func: refl.Func
 			width, height: int
 			res1 := slang.ReflectionUserAttribute_GetArgumentValueInt(attr, 0, &width)
 			if res1 == slang.OK {
-				pass.target_width = uint(width)
+				pass.target_width = u32(width)
 			}
 			res2 := slang.ReflectionUserAttribute_GetArgumentValueInt(attr, 1, &height)
 			if res2 == slang.OK {
-				pass.target_height = uint(height)
+				pass.target_height = u32(height)
 			}
 		}
 	}
@@ -217,21 +217,27 @@ draw_program :: proc(prog: ^Program, cmd: vk.CommandBuffer, render_info: ^Render
 	pass_constants.image_count = u32(image_count)
 
 	for pass, pass_index in prog.passes {
-		target := get_image(prog.res, prog.pool_index + prog.start_index)
+		target_image := get_image(prog.res, prog.pool_index + prog.start_index)
 		pass_constants.prev_index = u32((prog.start_index + 1) % image_count)
 
-		target_width :=
-			pass.target_width == 0 ? prog.res.image_width : min(pass.target_width, prog.res.image_width)
-		target_height :=
-			pass.target_height == 0 ? prog.res.image_height : min(pass.target_height, prog.res.image_height)
+		target_width, target_height := render_info.dst_width, render_info.dst_height
+		if pass.target_width != 0 {
+			target_width = pass.target_width
+		}
+		if pass.target_height != 0 {
+			target_height = pass.target_height
+		}
+
+		target_width = min(target_width, prog.res.image_width)
+		target_height = min(target_height, prog.res.image_height)
 		pass_constants.width = f32(target_width)
 		pass_constants.height = f32(target_height)
-		target.pass_width = target_width
-		target.pass_height = target_height
+		target_image.pass_width = target_width
+		target_image.pass_height = target_height
 
 		transition_image(
 			cmd,
-			target,
+			target_image,
 			.COLOR_ATTACHMENT_OPTIMAL,
 			{.COLOR_ATTACHMENT_OUTPUT},
 			{.COLOR_ATTACHMENT_WRITE},
@@ -249,7 +255,7 @@ draw_program :: proc(prog: ^Program, cmd: vk.CommandBuffer, render_info: ^Render
 
 		color_attachment := vk.RenderingAttachmentInfo {
 			sType       = .RENDERING_ATTACHMENT_INFO,
-			imageView   = target.view,
+			imageView   = target_image.view,
 			imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
 			loadOp      = .DONT_CARE,
 			storeOp     = .STORE,
@@ -258,7 +264,7 @@ draw_program :: proc(prog: ^Program, cmd: vk.CommandBuffer, render_info: ^Render
 			sType = .RENDERING_INFO,
 			renderArea = {
 				offset = {0, 0},
-				extent = vk.Extent2D{width = u32(target_width), height = u32(target_height)},
+				extent = vk.Extent2D{width = target_width, height = target_height},
 			},
 			layerCount = 1,
 			colorAttachmentCount = 1,
@@ -280,7 +286,7 @@ draw_program :: proc(prog: ^Program, cmd: vk.CommandBuffer, render_info: ^Render
 		vk.CmdDraw(cmd, 3, 1, 0, 0)
 		vk.CmdEndRendering(cmd)
 
-		transition_image(cmd, target, .GENERAL, {.FRAGMENT_SHADER}, {.SHADER_READ})
+		transition_image(cmd, target_image, .GENERAL, {.FRAGMENT_SHADER}, {.SHADER_READ})
 		shift_program_images(prog)
 	}
 }

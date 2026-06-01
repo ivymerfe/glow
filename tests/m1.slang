@@ -16,6 +16,7 @@ float3 avg3x3(int2 coord)
 }
 
 [shader("pixel")]
+[glowTarget(1920,1080)]
 float4 pass_buffer(VertexOutput in) : SV_Target0
 {
     float2 coord = in.uv * scene.resolution;
@@ -79,7 +80,7 @@ float3 get_background(float3 rd)
 [shader("pixel")]
 float4 pass_draw(VertexOutput in) : SV_Target0
 {
-    int2 coord = int2(in.uv * scene.resolution);
+    int2 coord = int2(in.uv * float2(1920,1080));
     float3 ink = readImage(0, coord);
     float3 thickness = get_thickness(ink);
     float3 normal = get_normal(coord);
